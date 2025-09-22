@@ -1,0 +1,3 @@
+/app/code/c++/source/build/CMakeFiles/remesh.dir
+/app/code/c++/source/build/CMakeFiles/edit_cache.dir
+/app/code/c++/source/build/CMakeFiles/rebuild_cache.dir
