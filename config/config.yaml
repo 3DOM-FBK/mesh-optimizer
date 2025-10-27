@@ -1,4 +1,4 @@
-# Pipeline Global Config
+# Pipeline Global Config - Optimization model
 pipeline:
   remesh: true                        # enable/disable remeshing
   decimate: false                     # enable/disable decimation

@@ -1,5 +1,5 @@
 # mesh-optimizer - 3D Mesh Optimization Pipeline
-The project is a pipeline for 3D mesh optimization, designed to process 3D models (e.g., in OBJ format) through a series of automated steps that include cleaning, remeshing, decimation, material enhancement, and format conversion. It is intended to run in a Docker environment, leveraging both C++ tools (for remeshing) and Python scripts (for manipulation via Blender and other libraries).
+The project is a pipeline for 3D mesh optimization, designed to process 3D models (input = OBJ, FBX) through a series of automated steps that include cleaning, remeshing, decimation, material enhancement, and format conversion. It is intended to run in a Docker environment, leveraging both C++ tools (for remeshing) and Python scripts (for manipulation via Blender and other libraries).
 
 ---
 
@@ -10,7 +10,7 @@ The project is a pipeline for 3D mesh optimization, designed to process 3D model
 - **Decimation**: Reduces the number of polygons while preserving the overall shape of the model.  
 - **Geometric Cleaning**: Removes unnecessary or problematic geometries.  
 - **Material Enhancement**: Generates Ambient Occlusion and Roughness maps and manages textures.  
-- **Format Conversion**: Exports optimized models in various formats (OBJ, GLTF, FBX, USD, etc.).  
+- **Format Conversion**: Exports optimized models in various formats (OBJ, GLTF, GLB, FBX, USD, PLY, etc.).  
 - **Automation and Reproducibility**: Orchestrated via a main script (`main.py`) and configurable through YAML.
 
 ---
