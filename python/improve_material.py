@@ -62,9 +62,7 @@ def import_model(filepath):
     Import a 3D model into Blender based on its file extension.
 
     Supported formats:
-        - .obj : Wavefront OBJ
-        - .fbx : Autodesk FBX
-        - .ply : Polygon File Format
+        - .glb/.gltf
 
     Args:
         filepath (str): Full path to the 3D model file to import.
@@ -76,12 +74,8 @@ def import_model(filepath):
         ValueError: If the file extension is not supported.
     """
     ext = os.path.splitext(filepath)[1].lower()
-    if ext == ".obj":
-        bpy.ops.wm.obj_import(filepath=filepath)
-    elif ext == ".fbx":
-        bpy.ops.import_scene.fbx(filepath=filepath)
-    elif ext == ".ply":
-        bpy.ops.import_mesh.ply(filepath=filepath)
+    if ext in [".glb", ".gltf"]:
+        bpy.ops.import_scene.gltf(filepath=filepath, merge_vertices=True)
     else:
         raise ValueError(f"Unsupported format: {ext}")
     return bpy.context.selected_objects[0]
@@ -133,12 +127,10 @@ def bake_ambientOcclusion(model, output_path, img_size=1024):
     img.save()
 
 
-
 if __name__ == "__main__":
     args = parse_arguments()
 
-    if (args.basecolor_img != "None"):
-        generate_roughness(args.basecolor_img, "/tmp/roughness.png")
+    generate_roughness("/tmp/diffuse.png", "/tmp/roughness.png")
 
     model = import_model(args.input_file)
     bake_ambientOcclusion(model, "/tmp/ambientOcclusion.png", args.bake_image_size)

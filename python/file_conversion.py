@@ -52,6 +52,8 @@ def import_model(filepath):
         bpy.ops.import_mesh.ply(filepath=filepath)
     elif ext == ".stl":
         bpy.ops.import_mesh.stl(filepath=filepath)
+    elif ext in [".glb", ".gltf"]:
+        bpy.ops.import_scene.gltf(filepath=filepath, merge_vertices=True)
     else:
         raise ValueError(f"Unsupported format: {ext}")
     return bpy.context.selected_objects[0]
@@ -97,9 +99,9 @@ def export_model(obj, filepath):
     elif ext == ".fbx":
         bpy.ops.export_scene.fbx(filepath=filepath, use_selection=True)
     elif ext == ".gltf":
-        bpy.ops.export_scene.gltf(filepath=filepath, use_selection=True, export_format='GLB')
+        bpy.ops.export_scene.gltf(filepath=filepath, use_selection=True, export_format='GLTF_SEPARATE')
     elif ext == ".glb":
-        bpy.ops.export_scene.gltf(filepath=filepath, use_selection=True, export_format='GLTF_EMBEDDED')
+        bpy.ops.export_scene.gltf(filepath=filepath, use_selection=True, export_format='GLB')
     elif ext == ".ply":
         bpy.ops.export_mesh.ply(filepath=filepath, use_selection=True)
     elif ext == ".usd":

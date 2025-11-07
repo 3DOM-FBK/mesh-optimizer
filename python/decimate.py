@@ -72,14 +72,8 @@ def import_model(filepath):
         ValueError: If the file extension is not supported.
     """
     ext = os.path.splitext(filepath)[1].lower()
-    if ext == ".obj":
-        bpy.ops.wm.obj_import(filepath=filepath)
-    elif ext == ".fbx":
-        bpy.ops.import_scene.fbx(filepath=filepath)
-    elif ext == ".ply":
-        bpy.ops.import_mesh.ply(filepath=filepath)
-    elif ext == ".stl":
-        bpy.ops.import_mesh.stl(filepath=filepath)
+    if ext in [".glb", ".gltf"]:
+        bpy.ops.import_scene.gltf(filepath=filepath, merge_vertices=True)
     else:
         raise ValueError(f"Unsupported format: {ext}")
     return bpy.context.selected_objects[0]
@@ -114,15 +108,18 @@ def export_model(obj, filepath):
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
     
-    if ext == ".obj":
-        bpy.ops.wm.obj_export(filepath=filepath, export_selected_objects=True, export_materials=False)
+    if ext == ".glb":
+        bpy.ops.export_scene.gltf(
+            filepath=filepath,
+            use_selection=True
+        )
     else:
         raise ValueError(f"Unsupported format: {ext}")
 
 
 if __name__ == "__main__":
     args = parse_arguments()
-    filepath = "/tmp/model.obj"
+    filepath = "/tmp/model.glb"
 
     model = import_model(args.input_file)
 

@@ -20,7 +20,6 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Process 3D model baking parameters.")
     parser.add_argument('-i', '--input_file', type=str, required=True, help='Input file')
     parser.add_argument('-s', '--bake_image_size', type=int, default=512, help='Size of baked textures (default = 512)')
-    parser.add_argument('-b', '--basecolor_img', type=str, help='Basecolor image to apply on high resolution mesh')
 
     return parser.parse_args(argv)
 
@@ -85,6 +84,7 @@ def import_model(filepath):
         - .obj : Wavefront OBJ
         - .fbx : Autodesk FBX
         - .ply : Polygon File Format
+        - .glb/.gltf : GL Transmission Format
 
     Args:
         filepath (str): Full path to the 3D model file to import.
@@ -98,71 +98,11 @@ def import_model(filepath):
     ext = os.path.splitext(filepath)[1].lower()
     if ext == ".obj":
         bpy.ops.wm.obj_import(filepath=filepath)
-    elif ext == ".fbx":
-        bpy.ops.import_scene.fbx(filepath=filepath)
-    elif ext == ".ply":
-        bpy.ops.import_mesh.ply(filepath=filepath)
+    elif ext in [".glb", ".gltf"]:
+        bpy.ops.import_scene.gltf(filepath=filepath, merge_vertices=True)
     else:
         raise ValueError(f"Unsupported format: {ext}")
     return bpy.context.selected_objects[0]
-
-
-# ===== Function: assign_texture_to_mesh =====
-def assign_texture_to_mesh(obj, image_path):
-    """
-    Assign a texture image to a Blender mesh object using a new Principled BSDF material.
-
-    This function creates a new material with nodes, loads the specified image,
-    connects it to the Base Color of a Principled BSDF shader, and assigns the material to the mesh.
-
-    Args:
-        obj (bpy.types.Object): The Blender mesh object to assign the texture to.
-        image_path (str): Path to the image file to use as a texture.
-
-    Raises:
-        TypeError: If the provided object is not a mesh.
-        RuntimeError: If the image cannot be loaded from the specified path.
-    """
-    # Ensure the object is a mesh
-    if obj.type != 'MESH':
-        raise TypeError("Object must be a mesh")
-
-    # Create a new material
-    mat = bpy.data.materials.new(name="TextureMaterial")
-    mat.use_nodes = True
-    nodes = mat.node_tree.nodes
-    links = mat.node_tree.links
-
-    # Clear default nodes
-    for node in nodes:
-        nodes.remove(node)
-
-    # Create nodes
-    output_node = nodes.new(type='ShaderNodeOutputMaterial')
-    output_node.location = (400, 0)
-
-    bsdf_node = nodes.new(type='ShaderNodeBsdfPrincipled')
-    bsdf_node.location = (200, 0)
-
-    tex_node = nodes.new(type='ShaderNodeTexImage')
-    tex_node.location = (0, 0)
-
-    # Load image
-    try:
-        image = bpy.data.images.load(image_path)
-    except:
-        raise RuntimeError(f"Cannot load image at {image_path}")
-    tex_node.image = image
-
-    # Connect nodes
-    links.new(tex_node.outputs['Color'], bsdf_node.inputs['Base Color'])
-    links.new(bsdf_node.outputs['BSDF'], output_node.inputs['Surface'])
-
-    # Assign material to object
-    if obj.data.materials:
-        obj.data.materials[0] = mat
-    else:
-        obj.data.materials.append(mat)
 
 
 # ===== Function: merge_vertices =====
@@ -299,7 +239,7 @@ def compose_node_material(obj):
 
 # ===== Function: adaptive_cage_distance =====
 #
-# --> Bisogna lavorare su questa funzione, non calcola bene il valore di cage !!!
+# --> We need to work on this function, it doesn't calculate the cage value correctly!!!
 #
 def adaptive_cage_distance(high_obj, low_obj, sample_size=500, factor=1.5, max_ray_dist=1):
     """
@@ -449,28 +389,20 @@ def bake_texture(high_obj, low_obj, bake_type, cage_dist):
 
 # ===== Function: remesh_geometry =====
 def remesh_geometry(input_path, output_path):
-    """
-    Perform remeshing on a 3D model using an external C++ executable.
+    remesh_filePath = "/tmp/remesh_model.obj"
+    model = import_model(input_path)
+    export_model(model, remesh_filePath)
 
-    Args:
-        input_path (str): Path to the input 3D model file.
-        output_path (str): Path where the remeshed output will be saved.
+    remesh_exec = os.path.abspath('/opt/adaptive_remesh')
+    res = run_cpp_executable(remesh_exec, [remesh_filePath, output_path])
 
-    Returns:
-        bool: True if the remeshing process succeeded, False otherwise.
-
-    Notes:
-        - Uses the external remeshing executable located at '/opt/remesh'.
-        - The function relies on `run_cpp_executable` to run the external tool.
-    """
-    remesh_exec = os.path.abspath('/opt/remesh')
-    res = run_cpp_executable(remesh_exec, [input_path, output_path])
+    clear_scene()
 
     return res
 
 
-# ===== Function: gen_uv =====
-def gen_uv(model):
+# ===== Function: gen_uv_xatlas =====
+def gen_uv_xatlas(model):
     """
     Generate UV coordinates for a 3D mesh using xatlas.
 
@@ -485,8 +417,11 @@ def gen_uv(model):
         - UVs are exported back to the same model file if generation is successful.
         - Returns False if no valid UVs could be generated.
     """
+    print (f"read mesh...")
     mesh = trimesh.load_mesh(model)
+    print (f"generate uv...")
     vmapping, indices, uvs = xatlas.parametrize(mesh.vertices, mesh.faces)
+    print (f"generate uv done...")
 
     if uvs is not None and len(uvs) > 0 and not (uvs == 0).all():
         xatlas.export(model, mesh.vertices[vmapping], indices, uvs)
@@ -495,12 +430,47 @@ def gen_uv(model):
         return False
 
 
+# ===== Function: generate_uv_smart_project =====
+def generate_uv_smart_project(model_path,
+                              angle_limit=66.0,
+                              island_margin=0.0,
+                              area_weight=0.0,
+                              correct_aspect=True,
+                              scale_to_bounds=True):
+    """
+    Generate UV
+    """
+    try:
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+
+        low_model = import_model(model_path)
+
+        bpy.ops.object.select_all(action='DESELECT')
+        low_model.select_set(True)
+        bpy.context.view_layer.objects.active = low_model
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+
+        bpy.ops.uv.smart_project(
+            angle_limit=angle_limit,
+            island_margin=island_margin,
+            area_weight=area_weight,
+            correct_aspect=correct_aspect,
+            scale_to_bounds=scale_to_bounds
+        )
+
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        return True, low_model
+    except:
+        return False, low_model
+
+
 # ===== Function: export_model =====
 def export_model(obj, filepath):
     """
     Export a Blender mesh object to a specified file format.
-
-    Currently, only OBJ format is supported.
 
     Args:
         obj (bpy.types.Object): The Blender mesh object to export.
@@ -513,7 +483,6 @@ def export_model(obj, filepath):
     Notes:
         - The function deselects all other objects before exporting.
         - Only the selected object is exported.
-        - Materials are not exported for OBJ format.
     """
     ext = os.path.splitext(filepath)[1].lower()
     if obj.type != 'MESH':
@@ -526,8 +495,17 @@ def export_model(obj, filepath):
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
     
-    if ext == ".obj":
-        bpy.ops.wm.obj_export(filepath=filepath, export_selected_objects=True, export_materials=False)
+    if ext == ".glb":
+        bpy.ops.export_scene.gltf(
+            filepath=filepath,
+            use_selection=True
+        )
+    elif ext == ".obj":
+        bpy.ops.wm.obj_export(
+            filepath=filepath,
+            export_selected_objects=True, 
+            export_materials=False
+        )
     else:
         raise ValueError(f"Unsupported format: {ext}")
 
@@ -551,42 +529,14 @@ def save_image(image, path):
 
 
 # ===== Function: bake_texture =====
-def run_bake_texture(baseColor_img, tex_folder, bake_image_size):
-    """
-    Bake textures from a high-resolution mesh onto a low-resolution mesh in Blender.
-
-    This function imports high- and low-res models, optionally assigns a base color texture
-    to the high-res model, merges vertices on the low-res model, applies smooth shading,
-    creates bake images, sets up the node material, computes an adaptive cage distance, 
-    performs normal and diffuse baking, saves the resulting textures, and exports the low-res model.
-
-    Args:
-        baseColor_img (str): Path to the base color image to assign to the high-res mesh.
-        tex_folder (str): Folder where the baked textures will be saved.
-        bake_image_size (int): Resolution for the bake images (e.g., 1024, 2048).
-
-    Returns:
-        bool: True if the baking process completed successfully, False if any error occurred.
-
-    Notes:
-        - Uses Blender's Cycles renderer for baking.
-        - Handles normal and diffuse texture baking by default.
-        - Saves baked images in PNG format.
-        - Exports the low-res mesh to the same path as the high-res model.
-        - Any failure during the process will return False.
-    """
+def run_bake_texture(low_model, tex_folder, bake_image_size):
     try:
-        high_res = "/tmp/model.obj"
-        low_res = "/tmp/model_edit.obj"
+        high_res = "/tmp/model.glb"
 
         high_model = import_model(high_res)
-        low_model = import_model(low_res)
 
         high_model.name = "HighRes"
         low_model.name = "LowRes"
-
-        if os.path.isfile(baseColor_img):
-            assign_texture_to_mesh(high_model, baseColor_img)
         
         merge_vertices(low_model)
 
@@ -597,6 +547,8 @@ def run_bake_texture(baseColor_img, tex_folder, bake_image_size):
         compose_node_material(low_model)
 
         cage_dist = adaptive_cage_distance(high_model, low_model)
+        print (f"--> CAGE = {cage_dist}")
+
         for name, bake_type in bake_types.items():
             current_img = bake_texture(high_model, low_model, bake_type, cage_dist)
             save_image(current_img, os.path.join(tex_folder, f"{name}.png"))
@@ -616,16 +568,19 @@ if __name__ == "__main__":
 
     input_path = args.input_file
     root, ext = os.path.splitext(input_path)
-    output_path = f"{root}_edit{ext}"
+    model_path = f"{root}_edit.obj"
 
     tex_folder = "/tmp/"
-    res_remesh = remesh_geometry(input_path, output_path)
+    res_remesh = remesh_geometry(input_path, model_path)
 
     if res_remesh:
-        res_uv = gen_uv(output_path)
+        print (f"Generate UV")
+        # res_uv = gen_uv_xatlas(model_path)
+        res_uv, low_model = generate_uv_smart_project(model_path)
 
         if res_uv:
-            res_bake = run_bake_texture(args.basecolor_img, tex_folder, args.bake_image_size)
+            print (f"Bake Texture")
+            res_bake = run_bake_texture(low_model, tex_folder, args.bake_image_size)
 
             if not res_bake:
                 sys.exit(1)
