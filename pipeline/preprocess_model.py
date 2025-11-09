@@ -15,7 +15,6 @@ def parse_arguments():
 
     parser = argparse.ArgumentParser(description="Process 3D model baking parameters.")
     parser.add_argument('-i', '--input_file', type=str, required=True, help='Input file')
-    parser.add_argument('-s', '--bake_image_size', type=int, default=512, help='Size of baked textures (default = 512)')
 
     return parser.parse_args(argv)
 

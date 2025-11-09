@@ -73,7 +73,7 @@ RUN git clone https://github.com/jlblancoc/nanoflann.git /tmp/nanoflann && \
     rm -rf /tmp/nanoflann
 
 # Optional: Python deps inside Blender (e.g. numpy)
-RUN /opt/blender-4.4.0-linux-x64/4.4/python/bin/python3.11 -m pip install trimesh xatlas scipy opencv-python
+RUN /opt/blender-4.4.0-linux-x64/4.4/python/bin/python3.11 -m pip install trimesh xatlas scipy opencv-python mathlib
 
 RUN pip install pyyaml
 

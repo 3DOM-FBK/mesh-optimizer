@@ -195,7 +195,6 @@ class PipelineProcessor:
                 logger.error("Remesh failed. Aborting pipeline.")
                 return False
         
-        
 
         # Decimate geometry
         if config["pipeline"]["decimate"]:
@@ -203,6 +202,7 @@ class PipelineProcessor:
             if not res:
                 logger.error("Decimation failed. Aborting pipeline.")
                 return False
+
 
         # Improve material
         if config["pipeline"]["improve_material"]:

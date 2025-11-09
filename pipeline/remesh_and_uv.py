@@ -74,7 +74,10 @@ def import_model(filepath):
     if ext == ".obj":
         bpy.ops.wm.obj_import(filepath=filepath)
     elif ext in (".glb", ".gltf"):
-        bpy.ops.import_scene.gltf(filepath=filepath)
+        bpy.ops.import_scene.gltf(
+            filepath=filepath,
+            merge_vertices=True
+        )
     else:
         raise ValueError(f"Unsupported file format: {ext}")
 
@@ -200,8 +203,10 @@ if __name__ == "__main__":
         # Generate UVs
         generate_uv_smart_project(model)
 
-        # Export final .glb
+        # Export final .obj
         export_model(model, dir_path, ext=".glb", use_selection=True)
+    else:
+        sys.exit(1)
 
     # Cleanup
     remove_temp_data(dir_path)
