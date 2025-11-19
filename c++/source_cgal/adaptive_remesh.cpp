@@ -23,27 +23,21 @@ typedef CGAL::Surface_mesh<Point>      Mesh;
 
 #define TAG CGAL::Parallel_if_available_tag
 
-/**
- * Computes the average edge length of a mesh, optionally scaled by a factor.
- * 
- * @param mesh The input surface mesh
- * @param scale_factor Multiplicative factor applied to the average length (default: 1.0)
- * @return The computed target edge length, or 0.0 if the mesh has no edges
- */
-double compute_target_edge_length(const Mesh& mesh, double scale_factor = 1.0)
+
+double compute_target_edge(const Mesh& mesh)
 {
-    double total_length = 0.0;
-    size_t edge_count = 0;
+    // Lunghezza diagonale del bounding box della mesh
+    auto bbox = PMP::bbox(mesh);
+    double diag = std::sqrt(CGAL::squared_distance(Point(bbox.xmin(), bbox.ymin(), bbox.zmin()),
+                                                   Point(bbox.xmax(), bbox.ymax(), bbox.zmax())));
+    // Numero di facce
+    std::size_t n_faces = num_faces(mesh);
+    if(n_faces == 0) return diag; // fallback
 
-    for (auto e : edges(mesh)) {
-        total_length += PMP::edge_length(e, mesh);
-        ++edge_count;
-    }
+    // Edge medio stimato
+    double target_edge = diag / std::sqrt(static_cast<double>(n_faces));
 
-    if (edge_count == 0) return 0.0;
-
-    double avg_length = total_length / static_cast<double>(edge_count);
-    return avg_length * scale_factor;
+    return target_edge;
 }
 
 
@@ -61,7 +55,8 @@ double compute_target_edge_length(const Mesh& mesh, double scale_factor = 1.0)
  * @param radius The curvature radius (local or average) of the geometry.
  * @return double The estimated target edge length.
  */
-double edge_length_from_density(double density, double radius) {
+double edge_length_from_density(double density, double radius)
+{
     double n_points = 16.0 * density;
     double area_per_point = 4.0 * M_PI * radius * radius / n_points;
     return std::sqrt(4.0 * area_per_point / std::sqrt(3.0));
@@ -223,8 +218,8 @@ double compute_target_length(const Mesh& mesh)
  */
 double adaptive_isotropic_remesh(Mesh& mesh, Mesh& original_mesh, double tol = 1.0, double target_length = 1.0)
 {
-    double min_edge = target_length / 50.0;
-    double max_edge = target_length * 5.0;
+    double min_edge = target_length * 0.01;
+    double max_edge = target_length * 10.0;
 
     const std::pair edge_min_max{min_edge, max_edge};
 
@@ -285,19 +280,22 @@ int main(int argc, char** argv)
 
     Mesh original_mesh = mesh;
 
-    const double target_length = compute_target_length(mesh);
-    std::cout << "Average edge length: " << target_length << std::endl;
+    // const double target_length = compute_target_length(mesh);
+    // std::cout << "Average edge length: " << target_length << std::endl;
 
-    double tol = target_length / 30;
+    const double target_length = compute_target_edge(mesh);
+    std::cout << "target_length =  " << target_length << std::endl;
+
+    double tol = target_length;
     double hausdorff_dist = 0.0;
-    hausdorff_dist = adaptive_isotropic_remesh(mesh, original_mesh, tol, target_length);
+    hausdorff_dist = adaptive_isotropic_remesh(mesh, original_mesh,tol, target_length);
     
-    if (hausdorff_dist > target_length/2.0) {
-        tol /= 2;
-        mesh = original_mesh;
-        std::cout << "Retrying with tighter tolerance: " << tol << std::endl;
-        hausdorff_dist = adaptive_isotropic_remesh(mesh, original_mesh, tol, target_length);
-    }
+    // if (hausdorff_dist > target_length/2.0) {
+    //     tol /= 2;
+    //     mesh = original_mesh;
+    //     std::cout << "Retrying with tighter tolerance: " << tol << std::endl;
+    //     hausdorff_dist = adaptive_isotropic_remesh(mesh, original_mesh, tol, target_length);
+    // }
 
     if (!CGAL::IO::write_polygon_mesh(output_filename, mesh)) {
         std::cerr << "Error writing " << output_filename << "\n";

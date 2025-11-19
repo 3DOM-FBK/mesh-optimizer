@@ -1,63 +1,80 @@
-# mesh-optimizer - 3D Mesh Optimization Pipeline
-The project is a pipeline for 3D mesh optimization, designed to process 3D models (input = OBJ, FBX, GLB, GLTF) through a series of automated steps that include cleaning, remeshing, decimation, material enhancement, and format conversion. It is intended to run in a Docker environment, leveraging both C++ tools (for remeshing) and Python scripts (for manipulation via Blender and other libraries).
+# mesh-optimizer – 3D Mesh Optimization Pipeline
+
+Modular pipeline for automated optimization of 3D meshes (input: OBJ, GLB, GLTF).
+The project orchestrates a sequence of steps — cleaning, remeshing, decimation, material improvement, and format conversion — through a main script and Python modules executed (typically) inside Blender or with standard Python, C++ libraries.
+The project is designed for reproducible execution (e.g., in Docker).
 
 ---
 
 ## General Features
 
-- **Automated 3D Mesh Optimization**: The pipeline takes one or more 3D models as input and processes them according to a configurable sequence of steps.  
-- **Advanced Remeshing**: Uses a high-performance C++ executable for adaptive mesh remeshing.  
-- **Decimation**: Reduces the number of polygons while preserving the overall shape of the model.  
-- **Geometric Cleaning**: Removes unnecessary or problematic geometries.  
-- **Material Enhancement**: Generates Ambient Occlusion and Roughness maps and manages textures.  
-- **Format Conversion**: Exports optimized models in various formats (OBJ, GLTF, GLB, FBX, USD, PLY, etc.).  
-- **Automation and Reproducibility**: Orchestrated via a main script (`main.py`) and configurable through YAML.
+- Automatic and repeatable execution of an optimization sequence for one or multiple models.
+- Support for various input/output formats (OBJ, GLTF/GLB, FBX).
+- Integration of high-performance tools for remeshing and geometric transformations.
+- Generation and management of material maps (AO, Roughness, etc.).
+- Centralized configuration through YAML and detailed logging.
 
 ---
 
-## Main Modules
+## Starting from main.py
 
-### 1. `main.py`
-- Entry point of the pipeline.  
-- Loads the configuration (`config.yaml`).  
-- Handles logging.  
-- Orchestration: sequentially calls Python scripts and the C++ executable for each model.  
-- Main functions: cleaning, remeshing, decimation, material enhancement, format conversion.  
-- Utilizes functions such as `PipelineProcessor.run_cleanup`, `PipelineProcessor.run_remesh`, `PipelineProcessor.run_decimate`, `PipelineProcessor.improve_material`, `PipelineProcessor.format_conversion`.
-
-### 2. `cleanup_geo.py`
-Python script using Blender to:  
-- Clean the scene.  
-- Import the model.  
-- Remove isolated geometries.  
-- Triangulate the mesh.  
-- Export the cleaned model.
-
-### 3. `remesh.py`
-Python script that:  
-- Can run the C++ executable for remeshing via `run_cpp_executable`.  
-- Also handles UV mapping and texture baking via Python libraries (trimesh, xatlas, etc.).
-
-### 4. `decimate.py`
-Python script using Blender to apply a decimation modifier to the mesh, reducing the number of polygons according to a configurable ratio.
-
-### 5. `improve_material.py`
-Python script that:  
-- Generates roughness and ambient occlusion maps.  
-- Handles model import and texture baking via Blender and OpenCV.
-
-### 6. `file_conversion.py`
-Python script that imports the optimized model and exports it in the desired format, also managing textures.
-
-### 7. `c++/source/build/remesh`
-C++ executable (compiled from `c++/source/remesh.cpp`) implementing a high-performance adaptive remeshing algorithm, using libraries such as PMP, CGAL, Eigen, and TBB.
-
-### 8. `config.yaml`
-Configuration file defining the pipeline (which steps to run, output parameters, list of models to process, etc.).
+main.py is the entry point and orchestrator of the pipeline. Its main responsibilities include:
+- Loading configuration settings (e.g., config/config.yaml) and validating parameters.
+- Setting up logging and the working/output folder structure.
+- For each input model, executing the configured sequence of steps (cleaning → remesh → decimate → material → export).
+- Calling Python modules located in the pipelines folder and, if configured, external executables (native remesher).
+- Handling errors and applying retry/skip policies for failed steps.
+- Aggregating results and generating a final report (statistics on triangles, timings, quality).
 
 ---
 
-## Summary
+## Features in the pipelines Folder
 
-The project automates 3D mesh optimization through a modular pipeline, combining C++ and Python/Blender tools, with centralized configuration and support for multiple output formats.  
-Detailed information for each module can be found in their respective files, e.g., `main.py`, `remesh.py`, `cleanup_geo.py`, `decimate.py`, `improve_material.py`, `file_conversion.py`, `remesh.cpp`, and `config.yaml`.
+The pipelines folder contains the scripts/modules implementing each step of the pipeline.
+Below are the main functionalities per module (note: the deprecated and c++ folders are excluded):
+
+- cleanup_geo.py
+  - Imports the model into Blender or via Python libraries.
+  - Removes disconnected/isolated geometry, duplicate vertices, and degenerate faces.
+  - Applies transformations (scale/rotation), basic unwrapping, and triangulation.
+  - Exports the “cleaned” mesh for the following steps.
+
+- remesh.py
+  - Interfaces with the external remeshing executable — MMG Library.
+  - Adaptive parameters for controlling face density, edge preservation, and triangulation quality.
+  - Produces meshes with regular topology suitable for decimation and texture baking.
+
+- decimate.py
+  - Applies decimation algorithms (Blender modifier).
+  - Supports percentage thresholds or a target triangle count.
+  - Preserves UVs and minimizes visual artifacts.
+
+- improve_material.py
+  - Bakes maps such as Ambient Occlusion, Normal map, Roughness, Emission if required.
+  - Cleans and normalizes textures, converts channels, and optimizes images (resolution reduction, compression).
+  - Optionally generates standardized PBR materials.
+
+- file_conversion.py
+  - Imports the optimized result and exports it into the requested format (GLTF/GLB).
+  - Manages texture paths and relative/absolute references.
+  - Options to embed textures or save them as separate files.
+
+---
+
+## How the Pipeline Is Organized (Typical Workflow)
+
+1. main.py loads configuration and creates the working directory.
+2. cleanup_geo → produces the cleaned mesh.
+3. remesh → (optional) advanced remeshing.
+4. decimate → reduces polygons according to the target.
+5. improve_material → texture baking and optimization.
+6. file_conversion → export to the final format.
+7. Final report with quality metrics and output sizes.
+
+---
+
+## Where to Look for Further Details
+
+- main.py — pipeline orchestration and configuration.
+- pipelines/cleanup_geo.py, pipelines/remesh.py, pipelines/decimate.py, pipelines/improve_material.py, pipelines/file_conversion.py — implementation of each step.
+- config/config.yaml — parameters and execution sequence.

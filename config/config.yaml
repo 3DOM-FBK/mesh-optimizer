@@ -1,14 +1,11 @@
 # Pipeline Global Config - Optimization model
 pipeline:
-  remesh: false                       # enable/disable remeshing
-  decimate: true                      # enable/disable decimation
-  decimate_ratio: 0.5                 # decimation ratio (if enabled)
-  output_format: "glb"                # final export format: obj, gltf, glb, fbx, usd, ply
-  improve_material: true              # generate Ambient Occlusion and Roughness maps
-  image_resolution: 1024              # resolution of output images
-  output_folder: "/root/output"       # output folder for processed files
+  image_size: 2048                          # resolution of output images
+  output_dir: "/data/output/New_Test"       # output folder for processed files
+  quality: "high"                           # define decimation quality preset: high, medium and low
+  verbose: 0
+
 
 models:
-  - path: "/root/input/1beb8eed06eecfe6af6b2b33e6ac8085.glb"
-    name: "1beb8eed06eecfe6af6b2b33e6ac8085"
-    # basecolor_img: "/root/input_tmp/texture_CM002.jpg"
+  # - path: "/data/input/glb/Surdulica.glb"
+  - path: "/data/input/glb/building.glb"

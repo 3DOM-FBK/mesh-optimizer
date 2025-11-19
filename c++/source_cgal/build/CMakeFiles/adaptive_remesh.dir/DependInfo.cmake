@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/app/c++/test_algo/adaptive_remesh.cpp" "CMakeFiles/adaptive_remesh.dir/adaptive_remesh.cpp.o" "gcc" "CMakeFiles/adaptive_remesh.dir/adaptive_remesh.cpp.o.d"
+  "/app/c++/source_cgal/adaptive_remesh.cpp" "CMakeFiles/adaptive_remesh.dir/adaptive_remesh.cpp.o" "gcc" "CMakeFiles/adaptive_remesh.dir/adaptive_remesh.cpp.o.d"
   )
 
 # Targets to which this target links.
