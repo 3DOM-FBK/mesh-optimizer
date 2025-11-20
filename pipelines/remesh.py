@@ -1,282 +1,406 @@
+"""
+3D Model Remeshing Pipeline
+
+This module provides a complete pipeline for remeshing 3D models using MMG and Gmsh.
+It handles model import/export via Blender and orchestrates the remeshing workflow.
+"""
+
 import os
 import sys
 import subprocess
-import gmsh
-import bpy
+import glob
+from pathlib import Path
+from typing import Optional, Tuple, List
 import argparse
 
+import gmsh
+import bpy
 
-# ===== Function: parse_arguments =====
-def parse_arguments():
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+class Config:
+    """Configuration constants for the remeshing pipeline."""
+    MMG_EXECUTABLE_PATH = '/opt/mmg/build/bin/mmgs_O3'
+    SUPPORTED_IMPORT_FORMATS = {'.obj', '.glb', '.gltf'}
+    SUPPORTED_EXPORT_FORMATS = {'.glb', '.obj'}
+    TEMP_FILE_PATTERNS = ['*.obj', '*.mesh']
+
+
+# ============================================================================
+# Argument Parsing
+# ============================================================================
+
+def parse_arguments() -> argparse.Namespace:
+    """
+    Parse command-line arguments for the remeshing pipeline.
+    
+    Returns:
+        argparse.Namespace: Parsed arguments containing dir_path.
+    """
     argv = sys.argv
     if "--" in argv:
         argv = argv[argv.index("--") + 1:]
     else:
         argv = []
 
-    parser = argparse.ArgumentParser(description="Process 3D model parameters.")
-    parser.add_argument('-i', '--dir_path', type=str, required=True, help='Input dir path')
-
+    parser = argparse.ArgumentParser(
+        description="Process and remesh 3D models using MMG and Blender."
+    )
+    parser.add_argument(
+        '-i', '--dir_path',
+        type=str,
+        required=True,
+        help='Input directory path containing the 3D model'
+    )
+    
     return parser.parse_args(argv)
 
 
-# ===== Function: run_cpp_executable =====
-def run_cpp_executable(args=None, verbose=0):
-    """
-    Run a C++ executable with optional command-line arguments and capture its output.
+# ============================================================================
+# MMG Executable Runner
+# ============================================================================
 
-    Args:
-        executable_path (str): Full path to the C++ executable to run.
-        args (list, optional): List of arguments to pass to the executable (default: empty list).
-        verbose (bool, optional): If True, prints the stdout and stderr of the process (default: False).
+class MMGRunner:
+    """Handles execution of the MMG remeshing executable."""
+    
+    def __init__(self, executable_path: str = Config.MMG_EXECUTABLE_PATH):
+        """
+        Initialize the MMG runner.
+        
+        Args:
+            executable_path: Path to the MMG executable.
+        """
+        self.executable_path = os.path.abspath(executable_path)
+    
+    def run(self, args: Optional[List[str]] = None, verbose: bool = False) -> bool:
+        """
+        Execute the MMG remeshing tool.
+        
+        Args:
+            args: List of command-line arguments for MMG.
+            verbose: If True, display stdout/stderr from the process.
+        
+        Returns:
+            bool: True if execution succeeded, False otherwise.
+        """
+        cmd = [self.executable_path]
+        
+        if args:
+            cmd.extend(args)
+        
+        try:
+            if verbose:
+                result = subprocess.run(cmd, check=True)
+            else:
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    check=True
+                )
+            return result.returncode == 0
+        except (subprocess.CalledProcessError, FileNotFoundError, Exception):
+            return False
 
-    Returns:
-        bool: True if the executable ran successfully (exit code 0), False otherwise.
 
-    Notes:
-        - Uses subprocess.run with capture_output and text mode.
-        - Exceptions and non-zero exit codes are caught and return False.
-    """
-    cmd = [os.path.abspath('/opt/mmg/build/bin/mmgs_O3')]
+# ============================================================================
+# Blender Model Handler
+# ============================================================================
 
-    if args is None:
-        args = []
-
-    if args:
-        cmd.extend(args)
-
-    try:
-        if (verbose == 1):
-            res = subprocess.run(cmd)
-        else:
-            res = subprocess.run(cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL
+class BlenderModelHandler:
+    """Handles 3D model import and export operations in Blender."""
+    
+    @staticmethod
+    def import_model(filepath: str) -> bpy.types.Object:
+        """
+        Import a 3D model into Blender.
+        
+        Args:
+            filepath: Path to the model file (.obj, .glb, .gltf).
+        
+        Returns:
+            bpy.types.Object: The imported Blender object.
+        
+        Raises:
+            FileNotFoundError: If the file doesn't exist.
+            ValueError: If the file format is unsupported.
+        """
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"File not found: {filepath}")
+        
+        ext = os.path.splitext(filepath)[1].lower()
+        
+        if ext not in Config.SUPPORTED_IMPORT_FORMATS:
+            raise ValueError(
+                f"Unsupported file format: {ext}. "
+                f"Supported formats: {Config.SUPPORTED_IMPORT_FORMATS}"
             )
+        
+        bpy.ops.object.select_all(action='DESELECT')
+        
+        if ext == ".obj":
+            bpy.ops.wm.obj_import(filepath=filepath)
+        elif ext in (".glb", ".gltf"):
+            bpy.ops.import_scene.gltf(
+                filepath=filepath,
+                merge_vertices=True
+            )
+        
+        return bpy.context.selected_objects[0]
+    
+    @staticmethod
+    def export_model(
+        model: bpy.types.Object,
+        dir_path: str,
+        ext: str = ".glb",
+        use_selection: bool = True
+    ) -> str:
+        """
+        Export a Blender model to file.
+        
+        Args:
+            model: The Blender object to export.
+            dir_path: Directory where the file will be saved.
+            ext: File extension (.glb or .obj).
+            use_selection: If True, export only selected objects.
+        
+        Returns:
+            str: Path to the exported file.
+        
+        Raises:
+            TypeError: If the object is not a mesh.
+            ValueError: If the export format is unsupported.
+        """
+        if model.type != 'MESH':
+            raise TypeError(f"Object '{model.name}' is not a mesh.")
+        
+        if ext not in Config.SUPPORTED_EXPORT_FORMATS:
+            raise ValueError(
+                f"Unsupported export format: {ext}. "
+                f"Supported formats: {Config.SUPPORTED_EXPORT_FORMATS}"
+            )
+        
+        # Select only the target model
+        bpy.ops.object.select_all(action='DESELECT')
+        model.select_set(True)
+        bpy.context.view_layer.objects.active = model
+        
+        filepath = os.path.join(dir_path, f"remesh{ext}")
+        
+        if ext == ".glb":
+            bpy.ops.export_scene.gltf(
+                filepath=filepath,
+                export_format='GLB',
+                use_selection=use_selection
+            )
+        elif ext == ".obj":
+            bpy.ops.wm.obj_export(
+                filepath=filepath,
+                export_materials=False
+            )
+        
+        return filepath
+
+
+# ============================================================================
+# Gmsh Mesh Processor
+# ============================================================================
+
+class GmshProcessor:
+    """Handles mesh conversion operations using Gmsh."""
+    
+    @staticmethod
+    def prepare_for_mmg(file_path: str) -> Tuple[str, str]:
+        """
+        Convert a 3D model to .mesh format for MMG processing.
+        
+        Args:
+            file_path: Path to the input 3D model file.
+        
+        Returns:
+            Tuple[str, str]: Paths to (input .mesh file, expected output .mesh file).
+        """
+        gmsh.initialize()
+        
+        try:
+            # Import and generate mesh
+            gmsh.merge(file_path)
+            gmsh.model.mesh.generate(3)
+            
+            # Determine output paths
+            folder = os.path.dirname(file_path)
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            
+            mesh_path = os.path.join(folder, f"{base_name}.mesh")
+            output_path = os.path.join(folder, f"{base_name}_res.mesh")
+            
+            # Write the mesh file
+            gmsh.write(mesh_path)
+            
+            return mesh_path, output_path
+        finally:
+            gmsh.finalize()
+    
+    @staticmethod
+    def convert_to_obj(mesh_path: str) -> str:
+        """
+        Convert a .mesh file to Wavefront OBJ format.
+        
+        Args:
+            mesh_path: Path to the input .mesh file.
+        
+        Returns:
+            str: Path to the generated .obj file.
+        """
+        gmsh.initialize()
+        
+        try:
+            # Load the mesh file
+            gmsh.merge(mesh_path)
+            
+            # Determine output path
+            folder = os.path.dirname(mesh_path)
+            base_name = os.path.splitext(os.path.basename(mesh_path))[0]
+            obj_path = os.path.join(folder, f"{base_name}.obj")
+            
+            # Write OBJ file
+            gmsh.write(obj_path)
+            
+            return obj_path
+        finally:
+            gmsh.finalize()
+
+
+# ============================================================================
+# Remeshing Pipeline
+# ============================================================================
+
+class RemeshingPipeline:
+    """Orchestrates the complete remeshing workflow."""
+    
+    def __init__(self, dir_path: str):
+        """
+        Initialize the remeshing pipeline.
+        
+        Args:
+            dir_path: Working directory for the pipeline.
+        """
+        self.dir_path = Path(dir_path)
+        self.mmg_runner = MMGRunner()
+        self.blender_handler = BlenderModelHandler()
+        self.gmsh_processor = GmshProcessor()
+    
+    def remesh_geometry(self, file_path: str) -> Tuple[bool, str]:
+        """
+        Perform complete remeshing operation on a geometry file.
+        
+        Args:
+            file_path: Path to the input geometry file.
+        
+        Returns:
+            Tuple[bool, str]: (Success status, path to remeshed OBJ file).
+        """
+        # Prepare mesh for MMG
+        mesh_input, mesh_output = self.gmsh_processor.prepare_for_mmg(file_path)
+        
+        # Run MMG remeshing
+        args = ["-in", mesh_input, "-out", mesh_output]
+        success = self.mmg_runner.run(args)
+        
+        if not success:
+            return False, ""
+        
+        # Convert result back to OBJ
+        obj_path = self.gmsh_processor.convert_to_obj(mesh_output)
+        
+        return True, obj_path
+    
+    def cleanup_temp_files(self):
+        """Remove all temporary mesh files from the working directory."""
+        for pattern in Config.TEMP_FILE_PATTERNS:
+            files = glob.glob(
+                str(self.dir_path / "**" / pattern),
+                recursive=True
+            )
+            for file_path in files:
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass  # Silently ignore cleanup errors
+    
+    def execute(self) -> bool:
+        """
+        Execute the complete remeshing pipeline.
+        
+        Returns:
+            bool: True if pipeline completed successfully, False otherwise.
+        """
+        temp_obj = self.dir_path / "remesh.obj"
+        temp_glb = self.dir_path / "temp_model.glb"
+        
+        # Initialize clean Blender scene
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        
+        # Import original model
+        print(f"Importing model: {temp_glb}")
+        model = self.blender_handler.import_model(str(temp_glb))
+        
+        # Export as OBJ for remeshing
+        print(f"Exporting to OBJ: {temp_obj}")
+        self.blender_handler.export_model(
+            model,
+            str(self.dir_path),
+            ext=".obj",
+            use_selection=True
+        )
+        
+        # Perform remeshing
+        print("Running remeshing operation...")
+        success, remeshed_obj = self.remesh_geometry(str(temp_obj))
+        
+        if not success:
+            print("Remeshing failed!")
+            return False
+        
+        # Reset scene and import remeshed model
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        print(f"Importing remeshed model: {remeshed_obj}")
+        remeshed_model = self.blender_handler.import_model(remeshed_obj)
+        
+        # Export final GLB
+        print("Exporting final GLB...")
+        self.blender_handler.export_model(
+            remeshed_model,
+            str(self.dir_path),
+            ext=".glb",
+            use_selection=True
+        )
+        
+        # Cleanup temporary files
+        print("Cleaning up temporary files...")
+        self.cleanup_temp_files()
+        
+        print("Pipeline completed successfully!")
         return True
-    except:
-        return False
 
-# ===== Function: import_model =====
-def import_model(filepath):
-    """
-    Import a 3D model (.glb/.gltf) into Blender.
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+def main():
+    """Main entry point for the remeshing pipeline."""
+    args = parse_arguments()
     
-    Args:
-        filepath (str): The full path to the model file.
-    """
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"File not found: {filepath}")
+    pipeline = RemeshingPipeline(args.dir_path)
+    success = pipeline.execute()
     
-    ext = os.path.splitext(filepath)[1].lower()
-
-    bpy.ops.object.select_all(action='DESELECT')
-
-    if ext == ".obj":
-        bpy.ops.wm.obj_import(filepath=filepath)
-    elif ext in (".glb", ".gltf"):
-        bpy.ops.import_scene.gltf(
-            filepath=filepath,
-            merge_vertices=True
-        )
-    else:
-        raise ValueError(f"Unsupported file format: {ext}")
-
-    return bpy.context.selected_objects[0]
-
-
-# ===== Function: export_model =====
-def export_model(model, dir_path, ext=".glb", use_selection=True):
-    """
-    Export the current Blender scene or selected objects to a .glb file.
-    
-    Args:
-        filepath (str): The full path where the .glb file will be saved.
-        use_selection (bool): If True, export only selected objects.
-    """
-    if model.type != 'MESH':
-        raise TypeError(f"Object '{model.name}' is not a mesh.")
-    
-    # Deselect everything
-    bpy.ops.object.select_all(action='DESELECT')
-
-    # Select only the object we want to export
-    model.select_set(True)
-    bpy.context.view_layer.objects.active = model
-
-    filepath = os.path.join(dir_path, f"remesh{ext}")
-
-    if (ext == ".glb"):
-        bpy.ops.export_scene.gltf(
-            filepath=filepath,
-            export_format='GLB',
-            use_selection=use_selection
-        )
-    elif (ext == ".obj"):
-        bpy.ops.wm.obj_export(
-            filepath=filepath,
-            export_materials=False
-        )
-
-
-# ===== Function: preprocess_mmg =====
-def preprocess_mmg(file_path):
-    """
-    Pre-processes a 3D model file for remeshing with MMG via Gmsh.
-    
-    This function:
-    1. Initializes Gmsh.
-    2. Imports the given 3D model file (STL, STEP, etc.).
-    3. Generates a 3D mesh.
-    4. Writes the resulting mesh to a `.mesh` file in the same folder as the input file,
-       using the same base name.
-    5. Finalizes Gmsh.
-
-    Parameters:
-    file_path (str): Path to the input 3D model file.
-    """
-    # Initialize Gmsh
-    gmsh.initialize()
-
-    # Import the model
-    gmsh.merge(file_path)
-
-    # Generate a 3D mesh
-    gmsh.model.mesh.generate(3)
-
-    # Extract folder and base name from the input file
-    folder = os.path.dirname(file_path)
-    base_name = os.path.splitext(os.path.basename(file_path))[0]
-
-    # Construct output path for the .mesh file
-    out_path = os.path.join(folder, f"{base_name}.mesh")
-    mmg_out_path = os.path.join(folder, f"{base_name}_res.mesh")
-
-    # Write the mesh
-    gmsh.write(out_path)
-
-    # Finalize Gmsh
-    gmsh.finalize()
-
-    return out_path, mmg_out_path
-
-
-# ===== Function: postprocess_mmg =====
-def postprocess_mmg(file_path):
-    """
-    Converts a `.mesh` file produced for MMG back into a Wavefront OBJ file.
-
-    This function:
-    1. Initializes Gmsh.
-    2. Imports the `.mesh` file.
-    3. Exports the geometry/triangular mesh as a `.obj` file in the same folder,
-       using the same base name.
-    4. Finalizes Gmsh.
-    
-    Parameters:
-    file_path (str): Path to the input .mesh file.
-
-    Returns:
-    str: Path to the generated .obj file.
-    """
-    # Initialize Gmsh
-    gmsh.initialize()
-
-    # Load the .mesh file
-    gmsh.merge(file_path)
-
-    # Extract folder and base name
-    folder = os.path.dirname(file_path)
-    base_name = os.path.splitext(os.path.basename(file_path))[0]
-
-    # Construct OBJ output path
-    obj_path = os.path.join(folder, f"{base_name}.obj")
-
-    # Write the OBJ file
-    gmsh.write(obj_path)
-
-    # Finalize Gmsh
-    gmsh.finalize()
-
-    return obj_path
-
-
-# ===== Function: remesh_geometry =====
-def remesh_geometry(file_path):
-    mmg_infile, mmg_out_path = preprocess_mmg(file_path)
-    
-    args = ["-in", mmg_infile, "-out", mmg_out_path]
-    res = run_cpp_executable(args)
-
-    obj_path = postprocess_mmg(mmg_out_path)
-
-    return res, obj_path
-
-
-# ===== Function: remove_temp_data =====
-def remove_temp_data(dir_path):
-    """
-    Deletes all temporary mesh files inside the given directory and its subdirectories.
-
-    This function removes:
-    - all .obj files
-    - all .mesh files
-
-    Parameters:
-    dir_path (str): Root directory where temporary files will be deleted.
-    """
-    # File patterns to delete
-    patterns = ["*.obj", "*.mesh"]
-
-    for pattern in patterns:
-        files = glob.glob(os.path.join(dir_path, "**", pattern), recursive=True)
-
-        for file_path in files:
-            try:
-                os.remove(file_path)
-            except Exception:
-                pass
+    sys.exit(0 if success else 1)
 
 
 if __name__ == "__main__":
-    """
-    Main pipeline:
-    - Export OBJ mesh
-    - Perform remeshing
-    - Import remeshed mesh
-    - Export final mesh as GLB
-    - Clean temporary data
-    """
-    args = parse_arguments()
-    dir_path = args.dir_path
-
-    temp_remesh = os.path.join(dir_path, "remesh.obj")
-    temp_glb = os.path.join(dir_path, "temp_model.glb")
-
-    # Start clean
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-
-    # Import model
-    model = import_model(temp_glb)
-
-    # Export as .obj for remeshing
-    export_model(model, dir_path, ext=".obj", use_selection=True)
-
-    # Perform remeshing
-    res_remesh, obj_path = remesh_geometry(temp_remesh)
-    if res_remesh:
-        # Reset scene to avoid duplicate data
-        bpy.ops.wm.read_factory_settings(use_empty=True)
-
-        # Import remeshed model
-        print ("--> Importing remeshed model:", obj_path)
-        model = import_model(obj_path)
-
-        # Export final .glb
-        export_model(model, dir_path, ext=".glb", use_selection=True)
-    else:
-        sys.exit(1)
-
-    # Cleanup
-    remove_temp_data(dir_path)
+    main()

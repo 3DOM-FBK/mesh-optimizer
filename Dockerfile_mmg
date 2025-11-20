@@ -56,23 +56,6 @@ RUN apt-get update && \
 # Optional: Python deps inside Blender (e.g. numpy)
 RUN /opt/blender-4.4.0-linux-x64/4.4/python/bin/python3.11 -m pip install trimesh scipy opencv-python mathlib gmsh
 
-# # Install CGAL 6.0.1
-# WORKDIR /opt
-# RUN wget https://github.com/CGAL/cgal/releases/download/v6.1/CGAL-6.1.tar.xz && \
-#     tar -xf CGAL-6.1.tar.xz && \
-#     mkdir CGAL-6.1/build && \
-#     cd CGAL-6.1/build && \
-#     cmake .. && \
-#     make -j$(nproc) && \
-#     make install
-
-# RUN apt-get install -y libtbb-dev libgmp-dev libmpfr-dev liblapack-dev libblas-dev
-
-# RUN mkdir -p /opt/nanoflann/include
-# RUN git clone https://github.com/jlblancoc/nanoflann.git /tmp/nanoflann && \
-#     cp /tmp/nanoflann/include/nanoflann.hpp /opt/nanoflann/include/ && \
-#     rm -rf /tmp/nanoflann
-
 # Install MMG library
 RUN git clone https://github.com/MmgTools/mmg.git /opt/mmg
 WORKDIR /opt/mmg
@@ -88,6 +71,8 @@ RUN apt-get update && apt-get install -y \
     libxft2 \
     libx11-6 \
     libxext6
+
+# apt-get install -y libxft2 libx11-6 libxext6
 
 # Cleanup
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
