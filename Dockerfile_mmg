@@ -84,4 +84,4 @@ COPY ./main.py .
 COPY ./pipelines/*.py ./pipelines/
 COPY ./c++/source_cgal/build/adaptive_remesh /opt/
 
-# ENTRYPOINT ["python3", "main.py"]
+ENTRYPOINT ["python3", "main.py"]

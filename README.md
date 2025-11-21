@@ -78,3 +78,14 @@ Below are the main functionalities per module (note: the deprecated and c++ fold
 - main.py — pipeline orchestration and configuration.
 - pipelines/cleanup_geo.py, pipelines/remesh.py, pipelines/decimate.py, pipelines/improve_material.py, pipelines/file_conversion.py — implementation of each step.
 - config/config.yaml — parameters and execution sequence.
+
+## Running with Docker
+The pipeline is available as a Docker image on Docker Hub, which allows you to run the code in a reproducible environment with all dependencies pre-installed.
+
+- **Docker image**: 3domfbk/mesh-optimizer:21112025
+
+#### Basic usage
+To run the container with GPU support and mount your data folder:
+```
+docker run --rm -it --gpus all -v <local_data_path>:<container_data_path> 3domfbk/mesh-optimizer:21112025 -h
+```
