@@ -2,8 +2,11 @@
 pipeline:
   image_size: 2048                          # resolution of output images
   output_dir: "/data/output/New_Test"       # output folder for processed files
-  quality: "medium"                           # define decimation quality preset: high, medium and low
-  verbose: 1
+  quality: "medium"                         # define decimation quality preset: high, medium and low
+  remesh: false                             # enable/disable remeshing step
+  verbose: 0
 
 models:
-  - path: "/data/input/obj/sito_archeologico.obj"
+  - path: "/data/input/glb/building.glb"
+  # - path: "/data/input/glb/casa.glb"
+  # - path: "/data/input/glb/Surdulica.glb"

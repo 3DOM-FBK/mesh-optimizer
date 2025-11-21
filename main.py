@@ -75,6 +75,7 @@ class PipelineRunner:
         self.output_dir: str = pipeline_params.get("output_dir")
         self.image_size: int = pipeline_params.get("image_size", 1024)
         self.quality: str = pipeline_params.get("quality", "medium")
+        self.remesh: bool = pipeline_params.get("remesh", False)
         self.verbose: int = pipeline_params.get("verbose", 0)
         self.models: List[Dict[str, str]] = config.get("models", [])
         
@@ -109,7 +110,8 @@ class PipelineRunner:
                 processor.run_pipeline(
                     output_dir=model_out_dir,
                     image_size=self.image_size,
-                    quality=self.quality
+                    quality=self.quality,
+                    remesh=self.remesh
                 )
             except Exception as e:
                 # Use print to stderr for critical errors

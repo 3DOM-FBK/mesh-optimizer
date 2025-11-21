@@ -180,7 +180,7 @@ class MeshPipeline:
     # 3. Full Pipeline Execution
     # ==============================================================================
 
-    def run_pipeline(self, output_dir: str, image_size: int = 1024, quality: str = "medium") -> bool:
+    def run_pipeline(self, output_dir: str, image_size: int = 1024, quality: str = "medium", remesh: bool = False) -> bool:
         """
         Run the full 3D mesh processing pipeline.
 
@@ -188,6 +188,7 @@ class MeshPipeline:
             output_dir (str): The final destination directory for outputs.
             image_size (int): Resolution for baked textures.
             quality (str): Decimation quality ('low', 'medium', 'high').
+            remesh (bool): Whether to perform the remeshing step.
             
         Returns:
             bool: True if the pipeline completed successfully, False otherwise.
@@ -211,17 +212,20 @@ class MeshPipeline:
                 # Note: The preprocess script must copy the input file to temp_input_path
                 self._preprocess_model(self.input_file) 
 
-                # # 2. Remesh
-                # self._remesh(temp_dir)
-                
-                # # Copy remeshed output to final directory for external use
-                # if os.path.exists(temp_remesh_path):
-                #     remesh_final_dir = os.path.join(output_dir, "remesh")
-                #     os.makedirs(remesh_final_dir, exist_ok=True)
-                #     shutil.copy(temp_remesh_path, os.path.join(remesh_final_dir, self.TEMP_REMESH_NAME))
-                #     logger.info(f"Remesh output copied to {remesh_final_dir}")
-                # else:
-                #     logger.warning("Remesh output file not found after step.")
+                if remesh:
+                    # 2. Remesh
+                    self._remesh(temp_dir)
+                    
+                    # Copy remeshed output to final directory for external use
+                    if os.path.exists(temp_remesh_path):
+                        remesh_final_dir = os.path.join(output_dir, "remesh")
+                        os.makedirs(remesh_final_dir, exist_ok=True)
+                        shutil.copy(temp_remesh_path, os.path.join(remesh_final_dir, self.TEMP_REMESH_NAME))
+                        logger.info(f"Remesh output copied to {remesh_final_dir}")
+                    else:
+                        logger.warning("Remesh output file not found after step.")
+                else:
+                    logger.warning("No remeshing requested; skipping remeshing step.")
 
                 # 3. Decimate Original Geometry (High-poly source for baking)
                 self._decimate(temp_input_path, temp_decimate_path, quality)
