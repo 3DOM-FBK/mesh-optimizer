@@ -89,3 +89,19 @@ To run the container with GPU support and mount your data folder:
 ```
 docker run --rm -it --gpus all -v <local_data_path>:<container_data_path> 3domfbk/mesh-optimizer:21112025 -h
 ```
+
+## Config example:
+```
+# Pipeline Global Config - Optimization model
+pipeline:
+  image_size: 2048                          # resolution of output images
+  output_dir: "/data/output/New_Test"       # output folder for processed files
+  quality: "medium"                         # define decimation quality preset: high, medium and low
+  remesh: false                             # enable/disable remeshing step
+  verbose: 0
+
+models:
+  - path: "/data/input/glb/building.glb"
+  # - path: "/data/input/glb/casa.glb"
+  # - path: "/data/input/glb/Surdulica.glb"
+  ```
