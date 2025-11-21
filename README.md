@@ -24,7 +24,6 @@ main.py is the entry point and orchestrator of the pipeline. Its main responsibi
 - For each input model, executing the configured sequence of steps (cleaning → remesh → decimate → material → export).
 - Calling Python modules located in the pipelines folder and, if configured, external executables (native remesher).
 - Handling errors and applying retry/skip policies for failed steps.
-- Aggregating results and generating a final report (statistics on triangles, timings, quality).
 
 ---
 
@@ -33,7 +32,7 @@ main.py is the entry point and orchestrator of the pipeline. Its main responsibi
 The pipelines folder contains the scripts/modules implementing each step of the pipeline.
 Below are the main functionalities per module (note: the deprecated and c++ folders are excluded):
 
-- cleanup_geo.py
+- preprocess_model.py
   - Imports the model into Blender or via Python libraries.
   - Removes disconnected/isolated geometry, duplicate vertices, and degenerate faces.
   - Applies transformations (scale/rotation), basic unwrapping, and triangulation.
@@ -49,13 +48,10 @@ Below are the main functionalities per module (note: the deprecated and c++ fold
   - Supports percentage thresholds or a target triangle count.
   - Preserves UVs and minimizes visual artifacts.
 
-- improve_material.py
+- texture_generator.py
   - Bakes maps such as Ambient Occlusion, Normal map, Roughness, Emission if required.
   - Cleans and normalizes textures, converts channels, and optimizes images (resolution reduction, compression).
-  - Optionally generates standardized PBR materials.
-
-- file_conversion.py
-  - Imports the optimized result and exports it into the requested format (GLTF/GLB).
+  - Generates standardized PBR materials.
   - Manages texture paths and relative/absolute references.
   - Options to embed textures or save them as separate files.
 
@@ -64,19 +60,18 @@ Below are the main functionalities per module (note: the deprecated and c++ fold
 ## How the Pipeline Is Organized (Typical Workflow)
 
 1. main.py loads configuration and creates the working directory.
-2. cleanup_geo → produces the cleaned mesh.
+2. preprocess_model → produces the cleaned mesh.
 3. remesh → (optional) advanced remeshing.
 4. decimate → reduces polygons according to the target.
-5. improve_material → texture baking and optimization.
+5. texture_generator → texture baking, optimization and export to the final format.
 6. file_conversion → export to the final format.
-7. Final report with quality metrics and output sizes.
 
 ---
 
 ## Where to Look for Further Details
 
 - main.py — pipeline orchestration and configuration.
-- pipelines/cleanup_geo.py, pipelines/remesh.py, pipelines/decimate.py, pipelines/improve_material.py, pipelines/file_conversion.py — implementation of each step.
+- pipelines/preprocess_model.py, pipelines/remesh.py, pipelines/decimate.py, pipelines/texture_generator.py — implementation of each step.
 - config/config.yaml — parameters and execution sequence.
 
 ## Running with Docker
