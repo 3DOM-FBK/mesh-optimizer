@@ -1,0 +1,20 @@
+verbose: false
+save_stuff: false
+
+num_cuda_streams: 3
+
+pipeline:
+  threshold: 1.25
+  parallelDepth: 2
+
+  component_maxDepth: 2
+  checkSelfIntersection: false
+  checkNon2Manifold: true
+  num_omp_threads: 2
+  num_cuda_streams: 3
+  
+unwrap:
+  method: "abf" # options: "lscm", "abf"
+  abf_iters: 2
+  agg_parts: 5
+  pamo: false

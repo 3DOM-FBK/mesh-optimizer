@@ -40,7 +40,7 @@ class Config:
     DEFAULT_MERGE_DISTANCE = 0.0001
     
     # Supported file formats
-    SUPPORTED_FORMATS = {'.glb', '.gltf'}
+    SUPPORTED_FORMATS = {'.obj', '.glb', '.gltf'}
 
 
 # ============================================================================
@@ -119,10 +119,15 @@ class ModelIOHandler:
                 f"Supported formats: {Config.SUPPORTED_FORMATS}"
             )
         
-        bpy.ops.import_scene.gltf(
-            filepath=filepath,
-            merge_vertices=True
-        )
+        if ext == '.obj':
+            bpy.ops.wm.obj_import(
+                filepath=filepath
+            )
+        else:
+            bpy.ops.import_scene.gltf(
+                filepath=filepath,
+                merge_vertices=True
+            )
         
         imported_objects = bpy.context.selected_objects
         if not imported_objects:
@@ -159,10 +164,16 @@ class ModelIOHandler:
         obj.select_set(True)
         bpy.context.view_layer.objects.active = obj
         
-        bpy.ops.export_scene.gltf(
-            filepath=filepath,
-            use_selection=True
-        )
+        if ext == '.obj':
+            bpy.ops.wm.obj_export(
+                filepath=filepath,
+                export_selected_objects=True
+            )
+        else:
+            bpy.ops.export_scene.gltf(
+                filepath=filepath,
+                use_selection=True
+            )
 
 
 # ============================================================================

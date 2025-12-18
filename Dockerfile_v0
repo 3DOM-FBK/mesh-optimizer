@@ -1,0 +1,157 @@
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG NUM_THREADS=4
+ENV TZ=Europe/Rome
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+SHELL ["/bin/bash", "-lc"]
+
+# Timezone
+RUN apt-get update && \
+    apt-get install -y tzdata && \
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone && \
+    rm -rf /var/lib/apt/lists/*
+
+# System dependencies (unione completa di entrambi i Dockerfile)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Build tools
+    build-essential \
+    cmake \
+    git \
+    wget \
+    curl \
+    unzip \
+    pkg-config \
+    ca-certificates \
+    # Python
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    # Librerie grafiche X11
+    libx11-6 \
+    libx11-dev \
+    libxi6 \
+    libxi-dev \
+    libxext6 \
+    libxext-dev \
+    libxrandr2 \
+    libxrandr-dev \
+    libxinerama1 \
+    libxinerama-dev \
+    libxcursor1 \
+    libxcursor-dev \
+    libxxf86vm1 \
+    libxrender1 \
+    libxft2 \
+    libxkbcommon0 \
+    libsm6 \
+    # OpenGL/Mesa
+    libgl1 \
+    libgl1-mesa-dev \
+    libglu1-mesa \
+    libglu1-mesa-dev \
+    libegl1-mesa \
+    mesa-common-dev \
+    mesa-utils \
+    # Librerie matematiche e scientifiche
+    libeigen3-dev \
+    libboost-all-dev \
+    libopenblas-dev \
+    liblapack-dev \
+    libatlas-base-dev \
+    libgomp1 \
+    libtbb-dev \
+    # Librerie immagini e compressione
+    libjpeg-dev \
+    libpng-dev \
+    zlib1g-dev \
+    # Librerie di sicurezza
+    libssl-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Symlink python
+RUN ln -s /usr/bin/python3.11 /usr/bin/python3 || true
+
+# Upgrade pip
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# ----------------------------
+# Install PyTorch (CUDA 12.8) and torch-scatter
+# ----------------------------
+# Using PyTorch 2.7.1 with CUDA 12.8 support (matching base image)
+RUN pip install --no-cache-dir torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128 && \
+    pip install --no-cache-dir torch-scatter -f https://data.pyg.org/whl/torch-2.7.1+cu128.html
+
+# ----------------------------
+# Install Blender 4.4
+# ----------------------------
+WORKDIR /opt
+ENV BLENDER_VERSION=4.4.0
+RUN wget -q https://download.blender.org/release/Blender4.4/blender-${BLENDER_VERSION}-linux-x64.tar.xz && \
+    tar -xf blender-${BLENDER_VERSION}-linux-x64.tar.xz && \
+    ln -s /opt/blender-${BLENDER_VERSION}-linux-x64/blender /usr/local/bin/blender && \
+    rm blender-${BLENDER_VERSION}-linux-x64.tar.xz
+
+# Python dependencies inside Blender
+RUN /opt/blender-4.4.0-linux-x64/4.4/python/bin/python3.11 -m pip install --no-cache-dir \
+    opencv-python mathlib gmsh
+
+# ----------------------------
+# Install MMG library
+# ----------------------------
+RUN git clone --depth 1 https://github.com/MmgTools/mmg.git /opt/mmg
+WORKDIR /opt/mmg
+RUN mkdir build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && rm -rf /opt/mmg
+
+# ----------------------------
+# Clone and install PartUV
+# ----------------------------
+RUN git clone --depth 1 https://github.com/EricWang12/PartUV.git /opt/partuv
+WORKDIR /opt/partuv
+
+# Modify requirements for compatibility
+RUN sed -i 's/^numpy.*/numpy==1.26.4/' requirements.txt && \
+    sed -i 's/^trimesh.*/trimesh==3.23.5/' requirements.txt
+
+# Install project requirements
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir partuv
+
+# ----------------------------
+# Install additional Python dependencies
+# ----------------------------
+RUN pip install --no-cache-dir pyyaml
+
+# ----------------------------
+# Cleanup per ridurre dimensioni
+# ----------------------------
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/* \
+    /tmp/* \
+    /var/tmp/* \
+    /root/.cache \
+    /opt/partuv/.git \
+    && find /usr/local -type f -name '*.pyc' -delete \
+    && find /usr/local -type d -name '__pycache__' -delete \
+    && find /opt/blender-4.4.0-linux-x64 -type f -name '*.pyc' -delete \
+    && find /opt/blender-4.4.0-linux-x64 -type d -name '__pycache__' -delete
+
+# Rimuovi pacchetti di sviluppo non più necessari a runtime
+RUN apt-get autoremove -y && apt-get autoclean -y
+
+# ----------------------------
+# Setup MMG application files
+# ----------------------------
+WORKDIR /app
+COPY ./main.py .
+COPY ./pipelines/*.py ./pipelines/
+
+# Default working directory
+WORKDIR /app

@@ -23,7 +23,7 @@ import bpy
 
 class Config:
     """Configuration constants for the remeshing pipeline."""
-    MMG_EXECUTABLE_PATH = '/opt/mmg/build/bin/mmgs_O3'
+    MMG_EXECUTABLE_PATH = '/usr/local/bin/mmgs_O3'
     SUPPORTED_IMPORT_FORMATS = {'.obj', '.glb', '.gltf'}
     SUPPORTED_EXPORT_FORMATS = {'.glb', '.obj'}
     TEMP_FILE_PATTERNS = ['*.obj', '*.mesh']
@@ -307,9 +307,9 @@ class RemeshingPipeline:
         # Prepare mesh for MMG
         mesh_input, mesh_output = self.gmsh_processor.prepare_for_mmg(file_path)
         
-        # Run MMG remeshing
+        # Run MMG remeshing (verbose=True to see errors)
         args = ["-in", mesh_input, "-out", mesh_output]
-        success = self.mmg_runner.run(args)
+        success = self.mmg_runner.run(args, verbose=True)
         
         if not success:
             return False, ""
@@ -319,18 +319,7 @@ class RemeshingPipeline:
         
         return True, obj_path
     
-    def cleanup_temp_files(self):
-        """Remove all temporary mesh files from the working directory."""
-        for pattern in Config.TEMP_FILE_PATTERNS:
-            files = glob.glob(
-                str(self.dir_path / "**" / pattern),
-                recursive=True
-            )
-            for file_path in files:
-                try:
-                    os.remove(file_path)
-                except Exception:
-                    pass  # Silently ignore cleanup errors
+
     
     def execute(self) -> bool:
         """
@@ -365,24 +354,6 @@ class RemeshingPipeline:
         if not success:
             print("Remeshing failed!")
             return False
-        
-        # Reset scene and import remeshed model
-        bpy.ops.wm.read_factory_settings(use_empty=True)
-        print(f"Importing remeshed model: {remeshed_obj}")
-        remeshed_model = self.blender_handler.import_model(remeshed_obj)
-        
-        # Export final GLB
-        print("Exporting final GLB...")
-        self.blender_handler.export_model(
-            remeshed_model,
-            str(self.dir_path),
-            ext=".glb",
-            use_selection=True
-        )
-        
-        # Cleanup temporary files
-        print("Cleaning up temporary files...")
-        self.cleanup_temp_files()
         
         print("Pipeline completed successfully!")
         return True

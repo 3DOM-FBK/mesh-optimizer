@@ -1,0 +1,19 @@
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Models and large files
+model_objaverse.ckpt
+*.ckpt
+*.pth
+*.bin
+
+# Temporary folders
+/tmp/
+/data/
+/output/
+
+# Blender local files
+*.blend
+*.blend1

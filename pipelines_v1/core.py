@@ -87,8 +87,8 @@ class MeshPipeline:
         # The temporary paths will be resolved within the run_pipeline context
         # but these names are used for consistency.
         self.TEMP_INPUT_NAME = "temp_model.glb"
-        self.TEMP_REMESH_NAME = "remesh.glb"
-        self.TEMP_DECIMATE_NAME = "decimate.glb"
+        self.TEMP_REMESH_NAME = "remesh.obj"
+        self.TEMP_DECIMATE_NAME = "decimate.obj"
 
 
     # ===== Utility Methods (Private) =====
@@ -129,6 +129,40 @@ class MeshPipeline:
             raise
 
 
+    def _run_python_script(self, script_name: str, args: list = None) -> None:
+        """
+        Run a Python script directly (not through Blender).
+
+        Args:
+            script_name (str): Name of the script (e.g., 'uv_generator.py').
+            args (list[str]): Command-line arguments for the script.
+        
+        Raises:
+            subprocess.CalledProcessError: If the process returns a non-zero exit code.
+        """
+        script_path = os.path.join(SCRIPTS_DIR, script_name)
+        cmd = ["python3", script_path]
+
+        if args:
+            cmd.extend(args)
+
+        logger.debug(f"Executing: {' '.join(cmd)}")
+        
+        try:
+            if self.verbose == 1:
+                subprocess.run(cmd, check=True)
+            else:
+                subprocess.run(cmd, 
+                               check=True,
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL,
+                               stdin=subprocess.DEVNULL)
+            logger.debug(f"Successfully executed {script_name}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Python script '{script_name}' failed with exit code {e.returncode}.")
+            raise
+
+
     # ===== Pipeline Steps (Private) =====
     
     def _preprocess_model(self, input_path: str) -> None:
@@ -157,6 +191,18 @@ class MeshPipeline:
         args = ["--", "--input_file", input_path, "--output_file", output_path, "--quality", quality]
         self._run_blender_script("decimate.py", args)
         logger.info("Decimation step finished.")
+    
+    
+    def _uv_generator(self, input_path: str, output_path: str) -> None:
+        """Generate UVs for the 3D mesh using PartUV."""
+        logger.info("[4/5] Generating UVs...")
+        args = [
+            "--mesh_path", input_path, 
+            "-o", output_path, 
+            "--config_path", "/opt/partuv/config/config.yaml"
+        ]
+        self._run_python_script("uv_generator.py", args)
+        logger.info("UV generation step finished.")
 
 
     def _texture_generation(self, high_path: str, low_path: str, output_dir: str, image_size: int, check_emission: bool = False) -> None:
@@ -207,58 +253,55 @@ class MeshPipeline:
             temp_remesh_path = os.path.join(temp_dir, self.TEMP_REMESH_NAME)
             temp_decimate_path = os.path.join(temp_dir, self.TEMP_DECIMATE_NAME)
 
-            try:
-                # 1. Preprocess
-                # Note: The preprocess script must copy the input file to temp_input_path
-                self._preprocess_model(self.input_file) 
+            print (self.input_file)
+            self._preprocess_model(self.input_file)
 
-                if remesh:
-                    # 2. Remesh
-                    self._remesh(temp_dir)
-                    
-                    # Copy remeshed output to final directory for external use
-                    if os.path.exists(temp_remesh_path):
-                        remesh_final_dir = os.path.join(output_dir, "remesh")
-                        os.makedirs(remesh_final_dir, exist_ok=True)
-                        shutil.copy(temp_remesh_path, os.path.join(remesh_final_dir, self.TEMP_REMESH_NAME))
-                        logger.info(f"Remesh output copied to {remesh_final_dir}")
-                    else:
-                        logger.warning("Remesh output file not found after step.")
-                else:
-                    logger.warning("No remeshing requested; skipping remeshing step.")
+            self._remesh(temp_dir)
 
-                # 3. Decimate Original Geometry (High-poly source for baking)
-                self._decimate(temp_input_path, temp_decimate_path, quality)
+            self._decimate(temp_remesh_path, temp_decimate_path, "high")
 
-                # 4. Generate Textures (Bake from High-poly to Low-poly/Decimated)
-                # The assumption is that `temp_input_path` holds the high-poly geometry 
-                # (or the preprocessed version before decimation) and `temp_decimate_path` 
-                # is the resulting low-poly mesh.
-                if os.path.exists(temp_input_path) and os.path.exists(temp_decimate_path):
-                    decimation_final_dir = os.path.join(output_dir, "decimation")
-                    os.makedirs(decimation_final_dir, exist_ok=True)
-                    self._texture_generation(
-                        high_path=temp_input_path, 
-                        low_path=temp_decimate_path, 
-                        output_dir=decimation_final_dir, 
-                        image_size=image_size, 
-                        check_emission=True
-                    )
-                    pipeline_success = True
-                else:
-                    logger.error("Missing high or low poly mesh for texture generation. Skipping step.")
+            self._uv_generator(temp_decimate_path, temp_dir)
+
+            # try:
+            #     # 1. Preprocess
+            #     # Note: The preprocess script must copy the input file to temp_input_path
+            #     self._preprocess_model(self.input_file)
+
+            #     # 2. Remesh
+            #     self._remesh(temp_dir)
+
+            #     # 3. Decimate Remeshed Geometry (High-poly source for baking)
+            #     self._decimate(temp_remesh_path, temp_decimate_path, "high")
+
+            #     # 4. Generate Textures (Bake from High-poly to Low-poly/Decimated)
+            #     # The assumption is that `temp_input_path` holds the high-poly geometry 
+            #     # (or the preprocessed version before decimation) and `temp_decimate_path` 
+            #     # is the resulting low-poly mesh.
+            #     if os.path.exists(temp_input_path) and os.path.exists(temp_decimate_path):
+            #         decimation_final_dir = os.path.join(output_dir, "decimation")
+            #         os.makedirs(decimation_final_dir, exist_ok=True)
+            #         self._texture_generation(
+            #             high_path=temp_input_path, 
+            #             low_path=temp_decimate_path, 
+            #             output_dir=decimation_final_dir, 
+            #             image_size=image_size, 
+            #             check_emission=True
+            #         )
+            #         pipeline_success = True
+            #     else:
+            #         logger.error("Missing high or low poly mesh for texture generation. Skipping step.")
 
 
-            except subprocess.CalledProcessError:
-                logger.error("A Blender step failed. Aborting pipeline.")
-            except FileNotFoundError as e:
-                logger.error(f"Required file not found: {e}. Aborting pipeline.")
-            except Exception as e:
-                logger.critical(f"An unexpected error occurred during pipeline execution: {e}")
-            finally:
-                if pipeline_success:
-                    logger.info("--> Pipeline completed successfully.")
-                else:
-                    logger.warning("--> Pipeline completed with errors or incomplete.")
+            # except subprocess.CalledProcessError:
+            #     logger.error("A Blender step failed. Aborting pipeline.")
+            # except FileNotFoundError as e:
+            #     logger.error(f"Required file not found: {e}. Aborting pipeline.")
+            # except Exception as e:
+            #     logger.critical(f"An unexpected error occurred during pipeline execution: {e}")
+            # finally:
+            #     if pipeline_success:
+            #         logger.info("--> Pipeline completed successfully.")
+            #     else:
+            #         logger.warning("--> Pipeline completed with errors or incomplete.")
                 
-                return pipeline_success
+            #     return pipeline_success
