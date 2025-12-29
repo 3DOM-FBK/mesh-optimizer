@@ -1,3 +1,0 @@
-/app/c++/source_cgal/build/CMakeFiles/adaptive_remesh.dir
-/app/c++/source_cgal/build/CMakeFiles/edit_cache.dir
-/app/c++/source_cgal/build/CMakeFiles/rebuild_cache.dir

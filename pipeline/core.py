@@ -14,14 +14,14 @@ try:
     from scene_helper import SceneHelper
     from io_helper import MeshIO
     from preprocess import MeshPreprocessor
-    from remesher import GmshConverter, MmgRemesher
+    from remesher import CgalRemesher
     from decimate import MeshDecimator
 except ImportError:
     # Fallback per quando si esegue dentro Blender dove il path potrebbe essere diverso
     from .scene_helper import SceneHelper
     from .io_helper import MeshIO
     from .preprocess import MeshPreprocessor
-    from .remesher import GmshConverter, MmgRemesher
+    from .remesher import CgalRemesher
     from .decimate import MeshDecimator
 
 import shutil
@@ -33,7 +33,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("MeshOptimPipeline")
 
-def main(input_path: str, output_path: str):
+def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM"):
     """
     Esegue la pipeline principale di ottimizzazione mesh.
     
@@ -41,7 +41,7 @@ def main(input_path: str, output_path: str):
     2. Importazione Mesh
     3. Preprocessing (Flatten, Join, Clean, Fix)
     4. Export Temp (in /tmp)
-    5. Remeshing (OBJ -> MESH -> MMGS -> MESH -> OBJ)
+    5. Remeshing (CGAL Adaptive Isotropic Remeshing)
     6. Decimazione Finale (Target 300k facce)
     7. Export Finale
     """
@@ -124,21 +124,24 @@ def main(input_path: str, output_path: str):
             logger.error(f"Export HP fallito per {safe_mesh_name}. Salto.")
             continue
 
-        # 5. Remeshing Pipeline (External Tools)
-        logger.info(f"Fase 5 [{safe_mesh_name}]: Remeshing (Gmsh -> MMGS)")
-        temp_mesh_path = GmshConverter.obj_to_mesh(temp_hp_obj, generate_3d=False)
-        if not temp_mesh_path: continue
+        # 5. Remeshing con CGAL
+        logger.info(f"Fase 5 [{safe_mesh_name}]: Remeshing (CGAL Adaptive)")
+        temp_remeshed_obj = os.path.join(temp_dir, f"{base_name}_remeshed.obj")
         
-        optimized_mesh_path = MmgRemesher.optimize(temp_mesh_path, mode='surface')
-        if not optimized_mesh_path: continue
-        
-        temp_remeshed_obj = GmshConverter.mesh_to_obj(optimized_mesh_path)
-        if not temp_remeshed_obj: continue
+        remeshed_path = CgalRemesher.adaptive_remesh(
+            input_path=temp_hp_obj,
+            output_path=temp_remeshed_obj,
+            detail_level="high",
+            iterations=5
+        )
+        if not remeshed_path:
+            logger.error(f"Remeshing CGAL fallito per {safe_mesh_name}. Salto.")
+            continue
 
         # 6. Decimazione
         logger.info(f"Fase 6 [{safe_mesh_name}]: Import e Decimazione")
         # Invece di cleanup_scene, cancelliamo solo gli oggetti remeshati precedenti se presenti
-        remeshed_objects = MeshIO.load(temp_remeshed_obj)
+        remeshed_objects = MeshIO.load(remeshed_path)
         if not remeshed_objects: continue
         
         # Se Gmsh ha creato più pezzi, uniamoli
@@ -220,6 +223,10 @@ def main(input_path: str, output_path: str):
                         MaterialAssembler.assemble_material(lp_mesh, mesh_tex_dir)
                     except Exception as e:
                         logger.warning(f"Errore assemblaggio: {e}")
+
+                    # 11. Decimazione Finale (Preset Utente)
+                    logger.info(f"Fase 11 [{safe_mesh_name}]: Decimazione Finale (Preset: {decimation_presets})")
+                    MeshDecimator.apply_decimate(lp_mesh, preset=decimation_presets, custom_target=target_faces, hausdorf_threshold=0.001)
                     
                     lp_mesh.name = f"Optimized_{safe_mesh_name}"
                     final_optimized_objects.append(lp_mesh)
@@ -231,8 +238,8 @@ def main(input_path: str, output_path: str):
         except Exception as e:
             logger.error(f"Errore critico loop optimization per {safe_mesh_name}: {e}")
 
-    # 11. Salvataggio Finale (Combinato)
-    logger.info(f"Fase 11: Salvataggio Risultato Finale Combinato")
+    # 12. Salvataggio Finale (Combinato)
+    logger.info(f"Fase 12: Salvataggio Risultato Finale Combinato")
     if final_optimized_objects:
         final_glb_path = os.path.join(output_path, f"{input_filename}_optimized.glb")
         # Nascondi tutto tranne gli optimized per l'export

@@ -198,10 +198,10 @@ class MeshPreprocessor:
         bpy.ops.mesh.select_all(action='SELECT')
         bpy.ops.mesh.remove_doubles(threshold=0.0001)
         
-        # 2. Fix Non-Manifold (Tentativo di riempimento buchi)
-        bpy.ops.mesh.select_all(action='DESELECT')
-        bpy.ops.mesh.select_non_manifold()
-        bpy.ops.mesh.fill_holes(sides=0) # 0 = infinite sides allowed
+        # # 2. Fix Non-Manifold (Tentativo di riempimento buchi)
+        # bpy.ops.mesh.select_all(action='DESELECT')
+        # bpy.ops.mesh.select_non_manifold()
+        # bpy.ops.mesh.fill_holes(sides=0) # 0 = infinite sides allowed
         
         # 3. Remove Loose Geometry (vertici/bordi/facce isolati)
         bpy.ops.mesh.select_all(action='SELECT')

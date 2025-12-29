@@ -7,6 +7,9 @@ import gmsh
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Path del binario CGAL remesh
+CGAL_REMESH_BIN = "/opt/remesh"
+
 class GmshConverter:
     """
     Classe per la conversione di formati mesh usando Gmsh.
@@ -19,8 +22,7 @@ class GmshConverter:
         Args:
             obj_path (str): Path del file OBJ input.
             output_path (str, optional): Path output. Se None, usa lo stesso nome con estensione .mesh.
-            generate_3d (bool): Se True, tenta di generare una mesh volumetrica (tetraedri)
-                                prima di salvare. Utile per mmg3d.
+            generate_3d (bool): Se True, tenta di generare una mesh volumetrica (tetraedri).
         """
         if not os.path.exists(obj_path):
             logger.error(f"File input non trovato: {obj_path}")
@@ -39,13 +41,8 @@ class GmshConverter:
             
             if generate_3d:
                 logger.info("Tentativo di generazione mesh volumetrica (3D)...")
-                # Crea un Surface Loop e un Volume dai surface caricati?
-                # Gmsh a volte lo fa automaticamente se la superficie è chiusa con `generate(3)`.
-                # Se è un semplice OBJ, è solo un insieme di triangoli.
                 gmsh.model.mesh.generate(3)
             
-            # Imposta la versione del formato Msh (anche se .mesh è diverso, aiuta internamente)
-            # Salva in formato .mesh
             gmsh.write(output_path)
             logger.info(f"Conversione OBJ -> MESH completata: {output_path}")
             
@@ -79,53 +76,139 @@ class GmshConverter:
              logger.error(f"Errore conversione MESH -> OBJ: {e}")
              return None
 
-class MmgRemesher:
+
+class CgalRemesher:
     """
-    Classe wrapper per l'esecuzione di MMG3D.
+    Classe wrapper per l'esecuzione del tool CGAL Adaptive Isotropic Remeshing.
+    
+    Utilizza il binario compilato da CGAL 6.1 che supporta:
+    - Adaptive sizing field basato sulla curvatura locale
+    - Protezione automatica dei bordi (mesh aperte)
+    - Formati supportati: OBJ, OFF, PLY
     """
+    
     @staticmethod
-    def optimize(mesh_path: str, output_path: str = None, mode: str = 'surface', options: list = None) -> str:
+    def remesh(
+        input_path: str,
+        output_path: str = None,
+        tolerance: float = 0.001,
+        edge_min: float = None,
+        edge_max: float = None,
+        iterations: int = 5,
+        cgal_bin: str = CGAL_REMESH_BIN
+    ) -> str:
         """
-        Esegue l'ottimizzazione MMG sul file specificato.
+        Esegue il remeshing adattivo usando CGAL.
         
         Args:
-            mesh_path (str): Input .mesh file.
-            output_path (str, optional): Output .mesh file. Defaults to *_optim.mesh.
-            mode (str): 'surface' per mmgs_O3, 'volume' per mmg3d_O3.
-            options (list, optional): Opzioni aggiuntive.
+            input_path (str): Path del file mesh input (OBJ, OFF, PLY).
+            output_path (str, optional): Path del file output. Default: *_remeshed.obj
+            tolerance (float): Tolleranza di approssimazione per l'adattamento alla curvatura.
+                              Valori più bassi = edge più corti nelle zone curve.
+                              Default: 0.001
+            edge_min (float, optional): Lunghezza minima degli edge. 
+                                        Default: auto (0.1% della diagonale bbox).
+            edge_max (float, optional): Lunghezza massima degli edge.
+                                        Default: auto (5% della diagonale bbox).
+            iterations (int): Numero di iterazioni di remeshing. Default: 5
+            cgal_bin (str): Path del binario CGAL remesh. Default: /opt/remesh
+            
+        Returns:
+            str: Path del file output se successo, None altrimenti.
         """
-        if not os.path.exists(mesh_path):
-            logger.error(f"File mesh non trovato: {mesh_path}")
+        if not os.path.exists(input_path):
+            logger.error(f"File input non trovato: {input_path}")
+            return None
+        
+        if not os.path.exists(cgal_bin):
+            logger.error(f"Binario CGAL non trovato: {cgal_bin}")
             return None
             
         if output_path is None:
-            base, ext = os.path.splitext(mesh_path)
-            output_path = f"{base}_optim{ext}"
-            
-        # Selezione tool
-        if mode == 'volume':
-            tool = "mmg3d_O3"
-        else:
-            tool = "mmgs_O3"
-            # tool = "mmg3d_O3"
-            
-        cmd = [tool, "-in", mesh_path, "-out", output_path, "-hausd", "0.005", "-optim", "-noinsert", "-nomove", "-noswap"]
+            base, ext = os.path.splitext(input_path)
+            output_path = f"{base}_remeshed{ext}"
         
-        if options:
-            cmd.extend(options)
+        # Costruisci il comando
+        cmd = [cgal_bin, input_path, output_path, str(tolerance)]
         
-        logger.info(f"Esecuzione {tool}: {' '.join(cmd)}")
+        # Aggiungi edge_min e edge_max se specificati
+        if edge_min is not None:
+            cmd.append(str(edge_min))
+            if edge_max is not None:
+                cmd.append(str(edge_max))
+                cmd.append(str(iterations))
+        elif iterations != 5:
+            # Se vogliamo solo cambiare le iterazioni, dobbiamo passare tutti i parametri
+            # In questo caso lasciamo i default per edge_min/max
+            pass
+        
+        logger.info(f"Esecuzione CGAL remesh: {' '.join(cmd)}")
+        
         try:
-            # Esegue il comando. Check=True solleva eccezione se fallisce.
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode != 0:
-                logger.error(f"Errore {tool} (Code {result.returncode}): {result.stderr}")
-                logger.error(f"{tool} Output: {result.stdout}")
+                logger.error(f"Errore CGAL remesh (Code {result.returncode}): {result.stderr}")
+                logger.error(f"CGAL Output: {result.stdout}")
+                return None
+            
+            # Log output del tool
+            if result.stdout:
+                for line in result.stdout.strip().split('\n'):
+                    logger.info(f"[CGAL] {line}")
+            
+            if os.path.exists(output_path):
+                logger.info(f"Remeshing CGAL completato: {output_path}")
+                return output_path
+            else:
+                logger.error(f"File output non creato: {output_path}")
                 return None
                 
-            logger.info(f"Ottimizzazione {tool} completata: {output_path}")
-            return output_path
         except Exception as e:
-            logger.error(f"Eccezione durante esecuzione {tool}: {e}")
+            logger.error(f"Eccezione durante esecuzione CGAL remesh: {e}")
             return None
+    
+    @staticmethod
+    def adaptive_remesh(
+        input_path: str,
+        output_path: str = None,
+        detail_level: str = "high",
+        iterations: int = 5,
+        cgal_bin: str = CGAL_REMESH_BIN
+    ) -> str:
+        """
+        Remeshing adattivo con preset di dettaglio predefiniti.
+        
+        Args:
+            input_path (str): Path del file mesh input.
+            output_path (str, optional): Path del file output.
+            detail_level (str): Livello di dettaglio:
+                - "low": tolleranza alta, meno triangoli
+                - "medium": bilanciato
+                - "high": tolleranza bassa, più dettaglio nelle curve (default)
+                - "ultra": massimo dettaglio
+            iterations (int): Numero di iterazioni. Default: 5
+            cgal_bin (str): Path del binario CGAL.
+            
+        Returns:
+            str: Path del file output se successo, None altrimenti.
+        """
+        # Preset di tolleranza per ogni livello
+        tolerance_presets = {
+            "low": 0.01,
+            "medium": 0.001,
+            "high": 0.0005,
+            "ultra": 0.0001
+        }
+        
+        tolerance = tolerance_presets.get(detail_level, 0.001)
+        
+        logger.info(f"Remeshing adattivo con livello '{detail_level}' (tolerance={tolerance})")
+        
+        return CgalRemesher.remesh(
+            input_path=input_path,
+            output_path=output_path,
+            tolerance=tolerance,
+            iterations=iterations,
+            cgal_bin=cgal_bin
+        )

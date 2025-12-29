@@ -71,7 +71,7 @@ class MaterialAssembler:
             {'patterns': ['METALLIC', 'METALNESS'], 'socket': 'Metallic', 'non_color': True, 'y': 0},
             {'patterns': ['ROUGHNESS'], 'socket': 'Roughness', 'non_color': True, 'y': -300},
             {'patterns': ['NORMAL'], 'socket': 'Normal', 'non_color': True, 'is_normal': True, 'y': -600},
-            {'patterns': ['AO', 'AMBIENT_OCCLUSION'], 'socket': None, 'non_color': True, 'is_ao': True, 'y': 600}, # AO si mixa
+            {'patterns': ['AO', 'AMBIENT_OCCLUSION'], 'socket': None, 'non_color': False, 'is_ao': True, 'y': 600}, # AO si mixa
             {'patterns': ['EMISSION', 'EMIT'], 'socket': 'Emission Color', 'non_color': False, 'y': -900},
             # Opacity/Alpha gestion
         ]

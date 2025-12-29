@@ -25,19 +25,36 @@ RUN apt-get update && apt-get install -y \
     libxft2 \
     cmake \
     build-essential \
+    libboost-all-dev \
+    libgmp-dev \
+    libmpfr-dev \
+    libtbb-dev \
+    libeigen3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Installazione di MMG Tools ---
+# # --- Installazione di MMG Tools ---
+# WORKDIR /opt
+# RUN git clone https://github.com/MmgTools/mmg.git && \
+#     cd mmg && \
+#     mkdir build && \
+#     cd build && \
+#     cmake .. && \
+#     make -j$(nproc) && \
+#     make install && \
+#     cd ../.. && \
+#     rm -rf mmg
+
+# --- Installazione di CGAL 6.1 da sorgente ---
 WORKDIR /opt
-RUN git clone https://github.com/MmgTools/mmg.git && \
-    cd mmg && \
-    mkdir build && \
-    cd build && \
+RUN wget https://github.com/CGAL/cgal/releases/download/v6.1/CGAL-6.1.tar.xz && \
+    tar -xf CGAL-6.1.tar.xz && \
+    mkdir CGAL-6.1/build && \
+    cd CGAL-6.1/build && \
     cmake .. && \
     make -j$(nproc) && \
     make install && \
     cd ../.. && \
-    rm -rf mmg
+    rm -rf CGAL-6.1 CGAL-6.1.tar.xz
 
 # Installa Python 3.11 (richiesto da PartUV)
 RUN add-apt-repository ppa:deadsnakes/ppa && \
