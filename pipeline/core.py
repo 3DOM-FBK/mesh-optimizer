@@ -4,8 +4,17 @@ import argparse
 import logging
 import sys
 import subprocess
+import shutil
+import urllib.request
 
-# Aggiungi la directory corrente al path per importare i moduli locali se necessario
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("MeshOptimPipeline")
+
+# Add current directory to path to import local modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
@@ -16,262 +25,275 @@ try:
     from preprocess import MeshPreprocessor
     from remesher import CgalRemesher
     from decimate import MeshDecimator
+    # Modules imported on-demand or here if preferred
 except ImportError:
-    # Fallback per quando si esegue dentro Blender dove il path potrebbe essere diverso
+    # Fallback for internal package execution
     from .scene_helper import SceneHelper
     from .io_helper import MeshIO
     from .preprocess import MeshPreprocessor
     from .remesher import CgalRemesher
     from .decimate import MeshDecimator
 
-import shutil
-
-# Configurazione logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("MeshOptimPipeline")
-
-def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM"):
+def ensure_checkpoint_exists(base_dir: str):
     """
-    Esegue la pipeline principale di ottimizzazione mesh.
-    
-    1. Pulizia Scena
-    2. Importazione Mesh
-    3. Preprocessing (Flatten, Join, Clean, Fix)
-    4. Export Temp (in /tmp)
-    5. Remeshing (CGAL Adaptive Isotropic Remeshing)
-    6. Decimazione Finale (Target 300k facce)
-    7. Export Finale
+    Checks if 'model_objaverse.ckpt' exists in the script folder.
+    If not, downloads it from HuggingFace.
     """
+    filename = "model_objaverse.ckpt"
+    ckpt_path = os.path.join(base_dir, filename)
     
-    logger.info("=== Inizio Pipeline Mesh Optim ===")
-    
-    # 1. Pulisci la scena
-    logger.info("Fase 1: Pulizia Scena")
-    SceneHelper.cleanup_scene()
-    
-    # 2. Importa il modello
-    logger.info(f"Fase 2: Importazione Modello da {input_path}")
-    imported_objects = MeshIO.load(input_path)
-    
-    if not imported_objects:
-        logger.error("Nessun oggetto importato. Interruzione pipeline.")
-        return
-
-    # 3. Preprocessing
-    logger.info("Fase 3: Preprocessing (Flatten, Fix, Clean)")
-    
-    # Troviamo i veri root nella gerarchia di Blender per gli oggetti importati
-    all_roots = set()
-    for obj in imported_objects:
-        curr = obj
-        while curr.parent:
-            curr = curr.parent
-        all_roots.add(curr)
-    roots = list(all_roots)
-    
-    processed_meshes = []
-    
-    if len(roots) == 1:
-        logger.info(f"Oggetto Root identificato: {roots[0].name}")
-        processed_meshes = MeshPreprocessor.process_by_material(roots[0].name)
-    elif len(roots) > 1:
-        logger.warning(f"Trovati {len(roots)} oggetti root: {[r.name for r in roots]}. Verranno uniti tramite un parent temporaneo.")
-        dummy_root = bpy.data.objects.new("DummyRoot", None)
-        bpy.context.scene.collection.objects.link(dummy_root)
+    if os.path.exists(ckpt_path):
+        logger.info(f"Checkpoint present: {ckpt_path}")
+        return ckpt_path
         
-        for r in roots:
-            mat = r.matrix_world.copy()
-            r.parent = dummy_root
-            r.matrix_world = mat
-        
-        processed_meshes = MeshPreprocessor.process_by_material(dummy_root.name)
-        
-        if dummy_root.name in bpy.data.objects:
-             bpy.data.objects.remove(dummy_root)
-    else:
-        logger.error("Impossibile determinare la gerarchia della mesh (Lista roots vuota).")
-        return
-
-    if not processed_meshes:
-        logger.error("Preprocessing fallito (nessuna mesh finale).")
-        return
-
-    # 4. Esportazione Temporanea per Remeshing
-    temp_dir = "/tmp"
-    if not os.path.exists(temp_dir):
-        os.makedirs(temp_dir)
-
-    input_filename = os.path.splitext(os.path.basename(input_path))[0]
-    final_optimized_objects = []
+    url = "https://huggingface.co/mikaelaangel/partfield-ckpt/resolve/main/model_objaverse.ckpt"
+    logger.info(f"Checkpoint missing. Starting download from: {url}")
     
-    logger.info(f"Fase 4: Inizio ottimizzazione per {len(processed_meshes)} gruppi di materiale")
-    
-    for i, hp_mesh in enumerate(processed_meshes):
-        # 4a. Setup nomi e percorsi per questo gruppo
-        safe_mesh_name = hp_mesh.name.replace(" ", "_")
-        base_name = f"{input_filename}_{safe_mesh_name}"
-        logger.info(f"--- Processando Gruppo {i+1}/{len(processed_meshes)}: {safe_mesh_name} ---")
-        
-        # Esportazione temporanea HP per remeshing
-        temp_dir = "/tmp"
-        if not os.path.exists(temp_dir): os.makedirs(temp_dir)
-        temp_hp_obj = os.path.join(temp_dir, f"{base_name}_hp.obj")
-        
-        if not MeshIO.export(temp_hp_obj, objects=[hp_mesh]):
-            logger.error(f"Export HP fallito per {safe_mesh_name}. Salto.")
-            continue
-
-        # 5. Remeshing con CGAL
-        logger.info(f"Fase 5 [{safe_mesh_name}]: Remeshing (CGAL Adaptive)")
-        temp_remeshed_obj = os.path.join(temp_dir, f"{base_name}_remeshed.obj")
-        
-        remeshed_path = CgalRemesher.adaptive_remesh(
-            input_path=temp_hp_obj,
-            output_path=temp_remeshed_obj,
-            detail_level="high",
-            iterations=5
+    try:
+        # User-Agent to reduce blocking risk
+        req = urllib.request.Request(
+            url, 
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         )
-        if not remeshed_path:
-            logger.error(f"Remeshing CGAL fallito per {safe_mesh_name}. Salto.")
-            continue
+        with urllib.request.urlopen(req) as response, open(ckpt_path, 'wb') as out_file:
+            shutil.copyfileobj(response, out_file)
+        logger.info("Checkpoint download completed.")
+    except Exception as e:
+        raise RuntimeError(f"Unable to download checkpoint: {e}")
+        
+    return ckpt_path
 
-        # 6. Decimazione
-        logger.info(f"Fase 6 [{safe_mesh_name}]: Import e Decimazione")
-        # Invece di cleanup_scene, cancelliamo solo gli oggetti remeshati precedenti se presenti
-        remeshed_objects = MeshIO.load(remeshed_path)
-        if not remeshed_objects: continue
+def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM", image_resolution: int = 2048):
+    """
+    Robust mesh optimization pipeline.
+    Interrupts execution in case of critical error at any stage.
+    """
+    logger.info("=== Start Mesh Optim Pipeline (Robust Mode) ===")
+    
+    try:
+        # Pre-Checks
+        if not os.path.exists(input_path):
+            raise FileNotFoundError(f"Input file not found: {input_path}")
+            
+        script_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # Se Gmsh ha creato più pezzi, uniamoli
-        lp_target = remeshed_objects[0]
-        if len(remeshed_objects) > 1:
-            bpy.ops.object.select_all(action='DESELECT')
-            for o in remeshed_objects: o.select_set(True)
-            bpy.context.view_layer.objects.active = lp_target
-            bpy.ops.object.join()
+        # 1. Scene Cleanup
+        logger.info("Phase 1: Scene Cleanup")
+        SceneHelper.cleanup_scene()
         
-        # Applica Decimate
-        target_faces = 300000 # // len(processed_meshes) # Distribuiamo il budget di facce
-        MeshDecimator.apply_decimate(lp_target, preset='CUSTOM', custom_target=target_faces, hausdorf_threshold=0.001)
-
-        # 7. Generazione UV (PartUV)
-        logger.info(f"Fase 7 [{safe_mesh_name}]: Generazione UV (PartUV)")
-        temp_decimated_obj = os.path.join(temp_dir, f"{base_name}_dec.obj")
-        MeshIO.export(temp_decimated_obj, objects=[lp_target])
+        # 2. Import
+        logger.info(f"Phase 2: Import {input_path}")
+        imported_objects = MeshIO.load(input_path)
+        if not imported_objects:
+            raise RuntimeError("No objects imported.")
+            
+        # 3. Preprocessing
+        logger.info("Phase 3: Preprocessing")
+        all_roots = set()
+        for obj in imported_objects:
+            curr = obj
+            while curr.parent: curr = curr.parent
+            all_roots.add(curr)
+        roots = list(all_roots)
         
-        base_dir_app = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        uv_script = os.path.join(base_dir_app, "pipeline", "uv_generator.py")
-        config_file = os.path.join(base_dir_app, "config", "config_partuv.yaml")
-        python_exe = "/opt/partuv_env/bin/python"
-        
-        cmd_uv = [python_exe, uv_script, "--mesh_path", temp_decimated_obj, "--config_path", config_file, "--output_path", temp_dir, "--pack_method", "none"]
-        
-        try:
-            res_uv = subprocess.run(cmd_uv, capture_output=True, text=True)
-            if res_uv.returncode == 0:
-                # 8. Import UV e Packing
-                mesh_stem = f"{base_name}_dec"
-                final_uv_obj_path = os.path.join(temp_dir, mesh_stem, "final_components.obj")
-                
-                # Rimuovi lp_target vecchio prima di caricare quello con UV
-                bpy.data.objects.remove(lp_target, do_unlink=True)
-                
-                uv_objects = MeshIO.load(final_uv_obj_path)
-                if uv_objects:
-                    lp_mesh = uv_objects[0]
-                    # Packing
-                    try:
-                        from uv_packer import UVPacker
-                        UVPacker.pack_islands(lp_mesh, margin=0.001)
-                    except Exception: pass
-                    
-                    # 9. Baking (HP -> LP)
-                    logger.info(f"Fase 9 [{safe_mesh_name}]: Baking da High Poly dedicata")
-                    from tex_baker import TextureAnalyzer, TextureBaker
-                    
-                    # Determina cartella output e sottocartella texture specifica per questa mesh
-                    out_dir = os.path.dirname(output_path) if os.path.splitext(output_path)[1] else output_path
-                    mesh_tex_dir = os.path.join(out_dir, f"tex_{safe_mesh_name}")
-                    
-                    # Analisi materiali High Poly per questo pezzo
-                    mat_analysis = TextureAnalyzer.analyze_mesh_materials(hp_mesh)
-                    all_maps = set()
-                    for m in mat_analysis.values(): 
-                        if m: all_maps.update(m['maps'].keys())
-                    
-                    if all_maps:
-                        baker = TextureBaker(resolution=2048, margin="infinite")
-                        # Esegue il bake
-                        baked_imgs = baker.bake_all(hp_mesh, lp_mesh, list(all_maps))
-                        
-                        # Salva le immagini nella cartella specifica per la mesh
-                        MeshIO.save_images_to_dir(baked_imgs, mesh_tex_dir)
-                        
-                        # Roughness post-process
-                        if 'ROUGHNESS' not in all_maps:
-                            try:
-                                from roughness_gen import RoughnessGenerator
-                                RoughnessGenerator.generate_roughness(mesh_tex_dir, method='AO')
-                            except Exception: pass
-                    
-                    # 10. Assemblaggio Materiale
-                    logger.info(f"Fase 10 [{safe_mesh_name}]: Assemblaggio Materiale")
-                    try:
-                        from material_assembler import MaterialAssembler
-                        MaterialAssembler.assemble_material(lp_mesh, mesh_tex_dir)
-                    except Exception as e:
-                        logger.warning(f"Errore assemblaggio: {e}")
-
-                    # 11. Decimazione Finale (Preset Utente)
-                    logger.info(f"Fase 11 [{safe_mesh_name}]: Decimazione Finale (Preset: {decimation_presets})")
-                    MeshDecimator.apply_decimate(lp_mesh, preset=decimation_presets, custom_target=target_faces, hausdorf_threshold=0.001)
-                    
-                    lp_mesh.name = f"Optimized_{safe_mesh_name}"
-                    final_optimized_objects.append(lp_mesh)
-                    
-                    # Possiamo ora nascondere la HP o rimuoverla
-                    hp_mesh.hide_render = True
-                    hp_mesh.hide_viewport = True
-                    
-        except Exception as e:
-            logger.error(f"Errore critico loop optimization per {safe_mesh_name}: {e}")
-
-    # 12. Salvataggio Finale (Combinato)
-    logger.info(f"Fase 12: Salvataggio Risultato Finale Combinato")
-    if final_optimized_objects:
-        final_glb_path = os.path.join(output_path, f"{input_filename}_optimized.glb")
-        # Nascondi tutto tranne gli optimized per l'export
-        for obj in bpy.data.objects:
-            if obj not in final_optimized_objects:
-                obj.select_set(False)
-        
-        if MeshIO.export(final_glb_path, objects=final_optimized_objects):
-            logger.info(f"Export GLB finale completato: {final_glb_path}")
-            logger.info("=== Pipeline Completata con Successo ===")
+        processed_meshes = []
+        if len(roots) == 1:
+            processed_meshes = MeshPreprocessor.process_by_material(roots[0].name)
+        elif len(roots) > 1:
+            dummy = bpy.data.objects.new("DummyRoot", None)
+            bpy.context.scene.collection.objects.link(dummy)
+            for r in roots:
+                r.parent = dummy
+            processed_meshes = MeshPreprocessor.process_by_material(dummy.name)
+            bpy.data.objects.remove(dummy)
         else:
-            logger.error("Errore durante l'esportazione GLB finale.")
-    else:
-        logger.error("Nessun oggetto ottimizzato da esportare.")
+            raise RuntimeError("Unable to determine mesh hierarchy.")
+            
+        if not processed_meshes:
+            raise RuntimeError("Preprocessing failed: no resulting meshes.")
+
+        # Checkpoint Download (Before Pipeline Loop / Before UV)
+        logger.info("Verifying ML Model Checkpoint...")
+        # Save in the project root (one lever up from pipeline dir) where main.py is
+        project_root = os.path.dirname(script_dir)
+        ensure_checkpoint_exists(project_root)
+
+        # Setup Temp
+        import uuid
+        base_temp_dir = "/tmp"
+        temp_dir = os.path.join(base_temp_dir, f"optim_{uuid.uuid4().hex}")
+        if not os.path.exists(temp_dir): os.makedirs(temp_dir)
+        logger.info(f"Using temp directory: {temp_dir}")
+        
+        input_filename = os.path.splitext(os.path.basename(input_path))[0]
+        final_optimized_objects = []
+        
+        # 4. Optimization Loop
+        logger.info(f"Starting optimization for {len(processed_meshes)} meshes...")
+        
+        for i, hp_mesh in enumerate(processed_meshes):
+            safe_name = hp_mesh.name.replace(" ", "_")
+            logger.info(f"--- Processing Mesh {i+1}/{len(processed_meshes)}: {safe_name} ---")
+            
+            base_name = f"{input_filename}_{safe_name}"
+            
+            # Export HP Temp
+            temp_hp = os.path.join(temp_dir, f"{base_name}_hp.obj")
+            if not MeshIO.export(temp_hp, objects=[hp_mesh]):
+                raise RuntimeError(f"Export HP failed for {safe_name}")
+            
+            # 5. Remeshing
+            logger.info(f"Phase 5 [{safe_name}]: CGAL Remeshing")
+            temp_remeshed = os.path.join(temp_dir, f"{base_name}_remeshed.obj")
+            remeshed_path = CgalRemesher.adaptive_remesh(temp_hp, temp_remeshed, detail_level="high", iterations=5)
+            if not remeshed_path:
+                raise RuntimeError(f"Remeshing failed for {safe_name}")
+                
+            # 6. Initial Decimation
+            logger.info(f"Phase 6 [{safe_name}]: Decimation Target 300k")
+            remeshed_objs = MeshIO.load(remeshed_path)
+            if not remeshed_objs:
+                raise RuntimeError(f"Load remeshed obj failed for {safe_name}")
+            
+            lp_target = remeshed_objs[0]
+            if len(remeshed_objs) > 1:
+                bpy.ops.object.select_all(action='DESELECT')
+                for o in remeshed_objs: o.select_set(True)
+                bpy.context.view_layer.objects.active = lp_target
+                bpy.ops.object.join()
+                
+            if not MeshDecimator.apply_decimate(lp_target, preset='CUSTOM', custom_target=300000, hausdorf_threshold=0.001):
+                raise RuntimeError(f"Initial decimation failed for {safe_name}")
+            
+            # 7. UV Generation (PartUV)
+            logger.info(f"Phase 7 [{safe_name}]: PartUV Generation")
+            temp_dec = os.path.join(temp_dir, f"{base_name}_dec.obj")
+            MeshIO.export(temp_dec, objects=[lp_target])
+            
+            uv_script = os.path.join(script_dir, "uv_generator.py")
+            config_file = os.path.join(os.path.dirname(script_dir), "config", "config_partuv.yaml")
+            python_exe = "/opt/partuv_env/bin/python" # Specific PartUV Environment
+            
+            cmd_uv = [
+                python_exe, uv_script, 
+                "--mesh_path", temp_dec, 
+                "--config_path", config_file, 
+                "--output_path", temp_dir, 
+                "--pack_method", "none"
+            ]
+            
+            proc = subprocess.run(cmd_uv, capture_output=True, text=True)
+            if proc.returncode != 0:
+                logger.error(f"PartUV Error Output:\n{proc.stderr}")
+                raise RuntimeError(f"PartUV generation failed for {safe_name}")
+            
+            # 8. Load UV & Packing
+            logger.info(f"Phase 8 [{safe_name}]: Import UV & Pack")
+            uv_obj_path = os.path.join(temp_dir, f"{base_name}_dec", "final_components.obj")
+            
+            bpy.data.objects.remove(lp_target, do_unlink=True)
+            uv_objects = MeshIO.load(uv_obj_path)
+            if not uv_objects:
+                raise RuntimeError(f"UV mesh load failed for {safe_name}")
+            lp_mesh = uv_objects[0]
+            
+            try:
+                from uv_packer import UVPacker
+                UVPacker.pack_islands(lp_mesh, margin=0.001)
+            except Exception as e:
+                logger.warning(f"UV Packing warning: {e}. Proceeding anyway.")
+                
+            # 9. Baking
+            logger.info(f"Phase 9 [{safe_name}]: Baking Maps")
+            try:
+                from tex_baker import TextureAnalyzer, TextureBaker
+                out_dir = os.path.dirname(output_path) if os.path.splitext(output_path)[1] else output_path
+                mesh_tex_dir = os.path.join(out_dir, f"tex_{safe_name}")
+                
+                mat_analysis = TextureAnalyzer.analyze_mesh_materials(hp_mesh)
+                all_maps = set()
+                for m in mat_analysis.values(): 
+                    if m: all_maps.update(m['maps'].keys())
+                
+                if all_maps:
+                    # Use passed image_resolution
+                    baker = TextureBaker(resolution=image_resolution, margin="infinite")
+                    baked = baker.bake_all(hp_mesh, lp_mesh, list(all_maps))
+                    MeshIO.save_images_to_dir(baked, mesh_tex_dir)
+                    
+                    if 'ROUGHNESS' not in all_maps:
+                        from roughness_gen import RoughnessGenerator
+                        RoughnessGenerator.generate_roughness(mesh_tex_dir, method='AO')
+            except Exception as e:
+                raise RuntimeError(f"Baking failed for {safe_name}: {e}")
+
+            # 10. Assemble
+            logger.info(f"Phase 10 [{safe_name}]: Assemble Materials")
+            try:
+                from material_assembler import MaterialAssembler
+                MaterialAssembler.assemble_material(lp_mesh, mesh_tex_dir)
+            except Exception as e:
+                raise RuntimeError(f"Material Assembly failed for {safe_name}: {e}")
+                
+            # 11. Final Decimation
+            logger.info(f"Phase 11 [{safe_name}]: Final Decimation (Preset: {decimation_presets})")
+            if not MeshDecimator.apply_decimate(lp_mesh, preset=decimation_presets, custom_target=300000, hausdorf_threshold=0.001):
+                raise RuntimeError(f"Final decimation failed for {safe_name} (Preset: {decimation_presets})")
+            
+            lp_mesh.name = f"Optimized_{safe_name}"
+            final_optimized_objects.append(lp_mesh)
+            
+            # Hide High Poly
+            hp_mesh.hide_render = True
+            hp_mesh.hide_viewport = True
+            
+        # 12. Final Export
+        logger.info("Phase 12: Final GLB Export")
+        if final_optimized_objects:
+            final_glb_path = os.path.join(output_path, f"{input_filename}_optimized.glb")
+            
+            bpy.ops.object.select_all(action='DESELECT')
+            for obj in final_optimized_objects:
+                obj.select_set(True)
+                
+            if MeshIO.export(final_glb_path, objects=final_optimized_objects):
+                logger.info(f"=== Pipeline Completed. Output: {final_glb_path} ===")
+            else:
+                raise RuntimeError("Final GLB Export failed.")
+        else:
+            raise RuntimeError("No final optimized objects produced.")
+
+    except Exception as e:
+        logger.error(f"CRITICAL ERROR: {e}")
+        # Terminate process with error code to signal failure
+        sys.exit(1)
+    finally:
+        # Cleanup ALL temporary data
+        if 'temp_dir' in locals() and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+                logger.info(f"Cleaned up temporary directory: {temp_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temp directory {temp_dir}: {e}")
 
 if __name__ == "__main__":
-    # Esempio di utilizzo da riga di comando (es. blender -b -P core.py -- args)
-    # Per ora usiamo un parse semplice o argomenti diretti se chiamati internamente.
-    # Se lanciato da CLI blender, sys.argv contiene gli argomenti di blender prima di "--"
-    
     if "--" in sys.argv:
         argv = sys.argv[sys.argv.index("--") + 1:]
     else:
-        argv = [] # Default o test
+        argv = []
 
     parser = argparse.ArgumentParser(description="Mesh Optimization Pipeline")
-    parser.add_argument("--input", type=str, required=True, help="Input mesh file path (.glb, .obj)")
-    parser.add_argument("--output", type=str, required=True, help="Output mesh file path")
+    parser.add_argument("--input", type=str, required=True, help="Input mesh file")
+    parser.add_argument("--output", type=str, required=True, help="Output mesh file")
+    parser.add_argument("--decimation_presets", type=str, default="MEDIUM", help="Decimation Preset (LOW, MEDIUM, HIGH, CUSTOM)")
+    parser.add_argument("--image_resolution", type=int, default=2048, help="Image resolution")
     
-    # Se non ci sono argomenti, non crashare (utile per testing interattivo)
-    if not argv:
-        logger.info("Nessun argomento fornito. In attesa di chiamate dirette a main().")
-    else:
-        args = parser.parse_args(argv)
-        main(args.input, args.output)
+    args = parser.parse_args(argv)
+    
+    # Create output directory based on input filename
+    input_filename = os.path.splitext(os.path.basename(args.input))[0]
+    output_dir = os.path.join(args.output, input_filename)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        
+    main(args.input, output_dir, args.decimation_presets, args.image_resolution)

@@ -4,14 +4,14 @@ import mathutils
 from mathutils.bvhtree import BVHTree
 import logging
 
-# Configurazione logging
+# Logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class MeshDecimator:
     """
-    Classe per la decimazione di mesh usando il modificatore Decimate di Blender.
-    Include logica adattiva basata sulla distanza di Hausdorff (approssimata).
+    Class for mesh decimation using Blender's Decimate modifier.
+    Includes adaptive logic based on Hausdorff distance (approximated).
     """
 
     PRESETS = {
@@ -23,43 +23,43 @@ class MeshDecimator:
     @staticmethod
     def _calculate_hausdorff_one_sided(target_obj, source_obj) -> float:
         """
-        Calcola la distanza di Hausdorff unilaterale (Massima distanza minima)
-        dai vertici di target_obj alla superficie di source_obj.
-        Utilizza un BVHTree per performance.
+        Calculates one-sided Hausdorff distance (Maximum minimum distance)
+        from vertices of target_obj to the surface of source_obj.
+        Uses a BVHTree for performance.
         """
-        # Assicuriamoci che le trasformazioni siano applicate o considerate
-        # Per semplicità, lavoriamo in World Space
+        # Ensure transformations are applied or considered
+        # For simplicity, we work in World Space
         
-        # Costruiamo il BVH tree dell'oggetto sorgente (originale)
-        # Nota: serve un dependency graph per ottenere la mesh valutata corretta
+        # Build BVH tree of source object (original)
+        # Note: a dependency graph is needed to get the correct evaluated mesh
         depsgraph = bpy.context.evaluated_depsgraph_get()
         source_eval = source_obj.evaluated_get(depsgraph)
         
-        # Creiamo il tree dalla mesh valutata (include trasformazioni globali se configurato, 
-        # ma FromObject lavora in local space solitamente. Meglio applicare le trasformazioni o gestirle).
-        # Per sicurezza, trasformiamo i vertici di target_obj nello spazio locale di source_obj
-        # OPPURE usiamo World Space per tutto.
+        # Create tree from evaluated mesh (includes global transformations if configured,
+        # but FromObject usually works in local space. Better to apply transforms or handle them).
+        # To be safe, we transform target_obj vertices to source_obj local space
+        # OR use World Space for everything.
         
-        # Approccio World Space:
-        # BVHTree.FromObject crea un tree in coordinate del mondo se applicato? No, locale.
-        # Costruiamo un tree custom con coordinate World.
+        # World Space approach:
+        # BVHTree.FromObject creates a tree in world coords if applied? No, local.
+        # We build a custom tree with World coordinates.
         
         bm = bmesh.new()
         bm.from_mesh(source_eval.data)
-        bm.transform(source_obj.matrix_world) # Applica trasformazione world al bmesh temporaneo
+        bm.transform(source_obj.matrix_world) # Apply world transform to temporary bmesh
         
         source_tree = BVHTree.FromBMesh(bm)
         bm.free()
         
         max_dist = 0.0
         
-        # Itera sui vertici della mesh target (decimata)
+        # Iterate over target mesh vertices (decimated)
         target_mesh = target_obj.data
         target_matrix = target_obj.matrix_world
         
         for v in target_mesh.vertices:
             world_co = target_matrix @ v.co
-            # Trova il punto più vicino sulla mesh sorgente
+            # Find nearest point on source mesh
             location, normal, index, dist = source_tree.find_nearest(world_co)
             if dist > max_dist:
                 max_dist = dist
@@ -70,134 +70,132 @@ class MeshDecimator:
     def apply_decimate(obj: bpy.types.Object, preset: str = 'MEDIUM', 
                        custom_target: int = None, hausdorf_threshold: float = 0.001) -> bool:
         """
-        Applica il modificatore Decimate all'oggetto.
+        Applies the Decimate modifier to the object.
         
         Args:
-            obj (bpy.types.Object): Oggetto da decimare.
-            preset (str): 'HIGH', 'MEDIUM', 'LOW' o 'CUSTOM'.
-            custom_target (int): Numero facce target se preset è 'CUSTOM'.
-            hausdorf_threshold (float): Soglia massima di errore (Distanza Hausdorff).
+            obj (bpy.types.Object): Object to decimate.
+            preset (str): 'HIGH', 'MEDIUM', 'LOW' or 'CUSTOM'.
+            custom_target (int): Target face count if preset is 'CUSTOM'.
+            hausdorf_threshold (float): Maximum error threshold (Hausdorff distance).
             
         Returns:
-            bool: True se successo, False altrimenti.
+            bool: True if successful, False otherwise.
         """
         if obj.type != 'MESH':
-            logger.error("L'oggetto non è una mesh.")
+            logger.error("Object is not a mesh.")
             return False
 
-        # Determina il target face count
+        # Determine target face count
         target_faces = 0
         preset_key = preset.upper()
         
         if preset_key == 'CUSTOM':
             if custom_target is None:
-                logger.error("Preset CUSTOM selezionato ma nessun custom_target fornito.")
+                logger.error("CUSTOM preset selected but no custom_target provided.")
                 return False
             target_faces = custom_target
         elif preset_key in MeshDecimator.PRESETS:
             target_faces = MeshDecimator.PRESETS[preset_key]
         else:
-            logger.warning(f"Preset {preset} non riconosciuto. Default a MEDIUM.")
+            logger.warning(f"Preset {preset} not recognized. Defaulting to MEDIUM.")
             target_faces = MeshDecimator.PRESETS['MEDIUM']
 
-        logger.info(f"Avvio decimazione: Preset={preset} | Target Iniziale={target_faces} | Threshold={hausdorf_threshold}")
+        logger.info(f"Starting decimation: Preset={preset} | Initial Target={target_faces} | Threshold={hausdorf_threshold}")
 
-        # Crea una copia dell'oggetto originale per riferimento (Hausdorff)
-        # Assicuriamoci di scollegarla dalla collezione per non interferire, o tenerla nascosta
+        # Create a copy of the original object for reference (Hausdorff)
+        # Ensure to unlink it from collection to not interfere, or keep it hidden
         original_mesh_data = obj.data.copy()
         original_obj = obj.copy()
         original_obj.data = original_mesh_data
         original_obj.name = f"{obj.name}_ORIGINAL_REF"
-        # Non linkiamo original_obj alla scena per evitare clutter, lo usiamo come data block
-        # Ma per il BVH tree è comodo averlo valido. Linkiamolo a una collezione nascosta se necessario.
-        # O semplicemente usiamolo come "data container".
+        # We don't link original_obj to scene to avoid clutter, we use it as data block
+        # But for BVH tree it is convenient to have it valid. Link it to a hidden collection if necessary.
+        # Or just use it as "data container".
         
-        # Nota: per geometry/bmesh non serve che sia in scena.
+        # Note: for geometry/bmesh it doesn't need to be in scene.
         
         initial_faces = len(obj.data.polygons)
         
-        # Calcolo diagonale bounding box per soglia adattiva
+        # Calculate bounding box diagonal for adaptive threshold
         bbox_corners = [obj.matrix_world @ mathutils.Vector(corner) for corner in obj.bound_box]
-        diag = (bbox_corners[6] - bbox_corners[0]).length # Corner opposti
-        if diag == 0: diag = 1.0 # Evita divisioni zero su mesh puntiformi
+        diag = (bbox_corners[6] - bbox_corners[0]).length # Opposite corners
+        if diag == 0: diag = 1.0 # Avoid division by zero on point meshes
         
-        # La soglia input è intesa come frazione della diagonale (es. 0.001 = 0.1% della dimensione modello)
+        # Input threshold is intended as fraction of diagonal (e.g. 0.001 = 0.1% of model size)
         adaptive_threshold = hausdorf_threshold * diag
         
-        logger.info(f"Dimensioni modello (Diag): {diag:.4f}m | Soglia Hausdorff Adattiva: {adaptive_threshold:.6f} (Base: {hausdorf_threshold})")
-        logger.info(f"Facce iniziali: {initial_faces}")
+        logger.info(f"Model Dimensions (Diag): {diag:.4f}m | Adaptive Hausdorff Threshold: {adaptive_threshold:.6f} (Base: {hausdorf_threshold})")
+        logger.info(f"Initial faces: {initial_faces}")
         
         if initial_faces <= target_faces:
-            logger.info("La mesh ha già meno facce del target. Nessuna decimazione necessaria.")
+            logger.info("Mesh already has fewer faces than target. No decimation needed.")
             bpy.data.meshes.remove(original_mesh_data)
             return True
 
-        # Loop adattivo (Max 6 tentativi)
+        # Adaptive Loop (Max 6 tries)
         current_target = target_faces
         max_retries = 6
         success = False
         
         for i in range(max_retries):
-            iteration_label = f"Iterazione {i+1}/{max_retries}"
+            iteration_label = f"Iteration {i+1}/{max_retries}"
             
-            # Calcola ratio
-            # Se la mesh ha subito modifiche precedenti, usiamo initial_faces "virtuale"?
-            # No, il modificatore lavora sullo stato corrente.
-            # Dobbiamo resettare la mesh allo stato originale ad ogni iterazione per applicare un nuovo ratio?
-            # Sì, altrimenti stiamo decimando il decimato.
+            # Calculate ratio
+            # Must reset mesh to original state at each iteration to apply new ratio?
+            # Yes, otherwise we are decimating the decimated.
             
-            # Ripristina la geometria originale sull'oggetto target
-            obj.data = original_mesh_data.copy() # Copia fresca dai dati originali
+            # Restore original geometry on target object
+            obj.data = original_mesh_data.copy() # Fresh copy from original data
             
             current_faces = len(obj.data.polygons)
             ratio = current_target / current_faces if current_faces > 0 else 1.0
             ratio = min(ratio, 1.0)
             
             if ratio >= 1.0:
-                 logger.info(f"{iteration_label}: Target {current_target} >= Facce attuali. Skip.")
+                 logger.info(f"{iteration_label}: Target {current_target} >= Current faces. Skip.")
                  success = True
                  break
 
-            # Aggiungi e applica modificatore
+            # Add and apply modifier
             mod = obj.modifiers.new(name="Decimate_Optim", type='DECIMATE')
             mod.ratio = ratio
-            mod.use_collapse_triangulate = True # Aiuta a mantenere topologia pulita
+            mod.use_collapse_triangulate = True # Helps keeping clean topology
             
-            # Applica il modificatore
-            # In Blender 4+ ops.object.modifier_apply richiede che l'oggetto sia attivo e in object mode
+            # Apply modifier
+            # In Blender 4+ ops.object.modifier_apply requires object to be active and in object mode
             bpy.context.view_layer.objects.active = obj
             bpy.ops.object.modifier_apply(modifier=mod.name)
             
-            # Conta le facce ottenute
+            # Count obtained faces
             new_face_count = len(obj.data.polygons)
             
-            # Controllo Hausdorff
-            # Usiamo original_obj come sorgente (High Res) e obj come target (Low Res)
+            # Hausdorff Check
+            # Use original_obj as source (High Res) and obj as target (Low Res)
             dist = MeshDecimator._calculate_hausdorff_one_sided(obj, original_obj)
             
-            logger.info(f"{iteration_label}: Ratio={ratio:.4f} -> Facce={new_face_count} | Hausdorff Dist={dist:.6f} (Soglia {adaptive_threshold:.6f})")
+            logger.info(f"{iteration_label}: Ratio={ratio:.4f} -> Faces={new_face_count} | Hausdorff Dist={dist:.6f} (Threshold {adaptive_threshold:.6f})")
             
             if i == max_retries - 1:
-                logger.warning(f"Raggiunto limite iterazioni ({max_retries}). Accetto il risultato anche se fuori soglia.")
+                logger.warning(f"Reached iteration limit ({max_retries}). Accepting result even if out of threshold.")
                 success = True
                 break
                 
             if dist <= adaptive_threshold:
-                logger.info("Ottimizzazione riuscita entro la soglia.")
+                logger.info("Optimization successful within threshold.")
                 success = True
                 break
             else:
-                logger.info("Soglia superata. Aumento il target face count di 1.5x e riprovo.")
+                logger.info("Threshold exceeded. Increasing target face count by 1.5x and retrying.")
                 current_target = int(current_target * 1.5)
         
-        # Pulizia
-        # Rimuovi il blocco dati originale di backup
+        # Cleanup
+        # Remove original backup data block
         if original_obj:
-            # original_obj è una copia python wrapper, ma i suoi dati (original_mesh_data) sono in bpy.data.meshes
-            # Se non è linkato alla scena, dobbiamo rimuoverlo dai dati
+            # original_obj is a python wrapper copy, but its data (original_mesh_data) are in bpy.data.meshes
+            # If not linked to scene, we must remove it from data
             bpy.data.meshes.remove(original_mesh_data)
-            # bpy.data.objects.remove(original_obj) # Se non è in scene, questo potrebbe non servire o dare errore?
-            # Un oggetto non linkato viene pulito al reload, ma meglio garbage collect manuale se possibile.
-            # Rimuoviamo la mesh data è sufficiente solitamente.
+            # bpy.data.objects.remove(original_obj) # If not in scene, this might not be needed or error?
+            # Unlinked object is cleaned on reload, but garbage collect manual is better if possible.
+            # Removing mesh data is usually sufficient.
         
         return success

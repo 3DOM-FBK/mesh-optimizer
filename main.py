@@ -2,141 +2,163 @@ import argparse
 import yaml
 import os
 import sys
-from typing import Dict, Any, List
-
-# Assume MeshPipeline class is correctly importable
+import subprocess
+import logging
 try:
-    from pipelines.core import MeshPipeline
+    from tqdm import tqdm
 except ImportError:
-    print("WARNING: Could not import MeshPipeline from 'pipelines.core'. Please ensure the path is correct.", file=sys.stderr)
-    sys.exit(1)
+    tqdm = None
 
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - [MainOrchestrator] - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("MainOrchestrator")
 
-# ==============================================================================
-# 1. Configuration Handling
-# ==============================================================================
-
-class ConfigurationError(Exception):
-    """Custom exception for configuration related errors."""
-    pass
-
-class PipelineConfig:
-    """
-    Handles command-line arguments and loads the YAML configuration file.
-    """
-    @staticmethod
-    def _parse_args() -> argparse.Namespace:
-        """Parses command-line arguments."""
-        parser = argparse.ArgumentParser(description="Optimization 3D Mesh Pipeline Runner.")
-        parser.add_argument(
-            "--config", 
-            type=str, 
-            required=True, 
-            help="Configuration file (YAML) path."
-        )
-        return parser.parse_args()
-
-    @staticmethod
-    def _load_yaml_config(config_path: str) -> Dict[str, Any]:
-        """Loads and validates the configuration from a YAML file."""
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Configuration file not found at: {config_path}")
-            
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-            
-        if not config or "pipeline" not in config or "models" not in config:
-            raise ConfigurationError("YAML structure error. Missing 'pipeline' or 'models' section.")
-            
-        return config
-
-    @classmethod
-    def load(cls) -> Dict[str, Any]:
-        """Entry point for loading and returning the full configuration."""
-        args = cls._parse_args()
-        return cls._load_yaml_config(args.config)
-
-
-# ==============================================================================
-# 2. Pipeline Execution Logic
-# ==============================================================================
-
-class PipelineRunner:
-    """
-    Manages the execution flow, iterating through models and running the pipeline.
-    Status messages are printed to standard output/error, relying on core.py 
-    for detailed logging of subprocesses.
-    """
+def load_config(config_path):
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
     
-    def __init__(self, config: Dict[str, Any]):
-        """Initializes the runner with validated configuration parameters."""
-        pipeline_params = config["pipeline"]
-        
-        self.output_dir: str = pipeline_params.get("output_dir")
-        self.image_size: int = pipeline_params.get("image_size", 1024)
-        self.quality: str = pipeline_params.get("quality", "medium")
-        self.remesh: bool = pipeline_params.get("remesh", False)
-        self.verbose: int = pipeline_params.get("verbose", 0)
-        self.models: List[Dict[str, str]] = config.get("models", [])
-        
-        if not self.output_dir:
-            raise ConfigurationError("The 'output_dir' is missing in the pipeline configuration.")
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
-        os.makedirs(self.output_dir, exist_ok=True)
+def run_blender_pipeline(config):
+    # Setup path
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    pipeline_script = os.path.join(project_root, "pipeline", "core.py")
+    
+    # Config parameters
+    pipeline_conf = config.get('pipeline', {})
+    output_base_dir = pipeline_conf.get('output_dir', './output')
+    quality = pipeline_conf.get('quality', 'MEDIUM').upper()
+    image_resolution = pipeline_conf.get('image_resolution', 2048)
+    
+    models = config.get('models', [])
+    
+    if not models:
+        logger.warning("No models found in config.")
+        return
 
-
-    def run(self) -> None:
-        """
-        Executes the mesh optimization pipeline for all models defined in the config.
-        """
-        if not self.models:
-            print("WARNING: No models found in the configuration. Aborting.", file=sys.stderr)
-            return
-
-        for idx, model_data in enumerate(self.models):
-            model_path = model_data.get("path")
+    # Blender command detection (assuming it's in PATH)
+    blender_exe = "blender"
+    
+    for i, model_entry in enumerate(models):
+        input_path = model_entry.get('path')
+        if not input_path:
+            logger.warning(f"Model {i} without path. Skipping.")
+            continue
             
-            if not model_path or not os.path.exists(model_path):
-                print(f"ERROR [{idx+1}/{len(self.models)}]: Model path invalid or not found: {model_path}. Skipping.", file=sys.stderr)
-                continue
+        if not os.path.exists(input_path):
+            logger.error(f"Input file not existing: {input_path}")
+            continue
+            
+        # Determine specific output directory
+        # core.py uses the output path to decide where to place files.
+        # If we pass a folder, it will save inside it.
+        
+        logger.info(f"Starting processing for: {input_path}")
+        
+        # Command Construction
+        # blender -b -P pipeline/core.py -- --input <in> --output <out> --decimation_presets <qual> --image_resolution <res>
+        
+        cmd = [
+            blender_exe,
+            "-b", # Background mode
+            "-P", pipeline_script,
+            "--", # Separator for python script arguments
+            "--input", input_path,
+            "--output", output_base_dir,
+            "--decimation_presets", quality,
+            "--image_resolution", str(image_resolution)
+        ]
+        
+        # logger.info(f"Executing command: {' '.join(cmd)}")
+        
+        try:
+            # We run in background with Popen to monitor progress
+            with subprocess.Popen(
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True, 
+                bufsize=1,
+                encoding='utf-8', 
+                errors='replace'
+            ) as process:
+                
+                full_output = []
+                pbar = None
+                
+                # Init progress bar if tqdm available
+                if tqdm:
+                    # Estimate phases: ~12 per loop
+                    pbar = tqdm(total=12, desc=f"Processing {os.path.basename(input_path)}", unit="phase")
+                
+                for line in process.stdout:
+                    line = line.strip()
+                    full_output.append(line)
+                    
+                    # Dynamic Total Update: Catch "Starting optimization for X meshes..."
+                    if "Starting optimization for" in line and "meshes" in line:
+                        try:
+                            # Expected format: "... Starting optimization for <N> meshes..."
+                            parts = line.split("Starting optimization for")[1].split("meshes")[0].strip()
+                            n_meshes = int(parts)
+                            
+                            # Calculation:
+                            # 3 Initial Phases (1,2,3)
+                            # 7 Loop Phases (5-11) * N
+                            # 1 Final Phase (12)
+                            # Total = 4 + (7 * n_meshes)
+                            # (Note: Phase 4 matches Loop start implicitly)
+                            
+                            new_total = 4 + (7 * n_meshes)
+                            if pbar is not None:
+                                pbar.total = new_total
+                                pbar.refresh()
+                        except ValueError:
+                            pass
 
-            basename = os.path.splitext(os.path.basename(model_path))[0]
-            model_out_dir = os.path.join(self.output_dir, basename)
-            os.makedirs(model_out_dir, exist_ok=True)
+                    # Update Progress on "Phase"
+                    if "Phase" in line:
+                         if pbar is not None:
+                             pbar.update(1)
+                             # Try to extract phase description
+                             parts = line.split(":", 1)
+                             if len(parts) > 1:
+                                 pbar.set_postfix_str(parts[1].strip()[:40])
+                    
+                    # Also log meaningful lines (optional, to avoid total silence if no tqdm)
+                    if tqdm is None:
+                        logger.info(f"[Blender] {line}")
+                
+                if pbar is not None: 
+                    pbar.close()
+                
+                return_code = process.wait()
+                
+                if return_code != 0:
+                    logger.error(f"Error during elaboration of {input_path}")
+                    logger.error("BLENDER OUTPUT:\n" + "\n".join(full_output))
+                else:
+                    logger.info(f"Completed: {input_path}")
 
-            try:
-                # Initialize and run the MeshPipeline from core.py
-                processor = MeshPipeline(model_path, self.verbose)
-                processor.run_pipeline(
-                    output_dir=model_out_dir,
-                    image_size=self.image_size,
-                    quality=self.quality,
-                    remesh=self.remesh
-                )
-            except Exception as e:
-                # Use print to stderr for critical errors
-                print(f"CRITICAL ERROR [{idx+1}/{len(self.models)}]: An unhandled error occurred during processing {basename}: {e}", file=sys.stderr) 
-
-
-# ==============================================================================
-# 3. Main Execution Function
-# ==============================================================================
+        except Exception as e:
+            logger.error(f"Generic error executing subprocess: {e}")
 
 def main():
-    """Main entry point."""
+    parser = argparse.ArgumentParser(description="Mesh Optimizer Orchestrator")
+    parser.add_argument("--config", type=str, required=True, help="Path to config.yaml")
+    
+    args = parser.parse_args()
+    
     try:
-        # 1. Load Configuration
-        config = PipelineConfig.load()
-        
-        # 2. Run Pipeline
-        runner = PipelineRunner(config)
-        runner.run()
-
-    except (FileNotFoundError, ConfigurationError, Exception) as e:
-        # Handle top-level errors (e.g., config file missing)
-        print(f"\nFATAL CONFIGURATION/SETUP ERROR: {e}", file=sys.stderr)
+        config = load_config(args.config)
+        run_blender_pipeline(config)
+    except Exception as e:
+        logger.critical(f"Fatal error: {e}")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

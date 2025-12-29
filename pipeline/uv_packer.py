@@ -1,65 +1,65 @@
 import bpy
 import logging
 
-# Configurazione logging
+# Logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class UVPacker:
     """
-    Classe per gestire il packing delle UV islands usando gli operatori di Blender.
+    Class to handle UV islands packing using Blender's operators.
     """
 
     @staticmethod
     def pack_islands(obj: bpy.types.Object, margin: float = 0.001):
         """
-        Applica l'operatore 'Pack Islands' di Blender a tutte le UV dell'oggetto.
+        Applies Blender's 'Pack Islands' operator to all UVs of the object.
         
         Args:
-            obj (bpy.types.Object): Mesh object con UV map.
-            margin (float): Margine tra le isole (in spazio UV 0-1).
+            obj (bpy.types.Object): Mesh object with UV map.
+            margin (float): Margin between islands (in UV space 0-1).
             
         Returns:
-            bool: True se successo, False altrimenti.
+            bool: True if successful, False otherwise.
         """
         if obj.type != 'MESH':
-            logger.error(f"L'oggetto {obj.name} non è una mesh.")
+            logger.error(f"Object {obj.name} is not a mesh.")
             return False
             
-        # Assicurati che l'oggetto sia attivo e selezionato
+        # Ensure object is active and selected
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(True)
         bpy.context.view_layer.objects.active = obj
         
-        # Passa in Edit Mode
+        # Switch to Edit Mode
         bpy.ops.object.mode_set(mode='EDIT')
         
-        # Seleziona tutte le facce per includere tutte le UV nel packing
+        # Select all faces to include all UVs in packing
         bpy.ops.mesh.select_all(action='SELECT')
         
-        # Seleziona tutti i vertici UV nel UV Editor (necessario per pack_islands)
-        # Nota: bpy.ops.uv.select_all funziona sul contesto dell'area UV/Image Editor.
-        # In modalità background potrebbe richiedere un override del contesto se non funziona direttamente.
-        # Tuttavia, standard pack_islands spesso agisce sulla selezione mesh corrente se 'rotate' e altri sono true.
+        # Select all UV vertices in UV Editor (required for pack_islands)
+        # Note: bpy.ops.uv.select_all works on UV/Image Editor context.
+        # In background mode might require context override if not working directly.
+        # However, standard pack_islands often acts on current mesh selection if 'rotate' etc are true.
         
-        logger.info(f"Avvio UV Packing per {obj.name} con margine {margin}...")
+        logger.info(f"Starting UV Packing for {obj.name} with margin {margin}...")
         
         try:
-            # Esegue il packing
-            # Parametri:
-            # - margin: spazio tra le isole
-            # - rotate: permette la rotazione per fit migliore (default True)
-            bpy.ops.uv.pack_islands(margin=margin, rotate=True) # PartUV orienta già le chart? Se sì, rotate=False.
-            # Se PartUV genera chart orientate a caso, meglio rotate=True.
+            # Executes packing
+            # Parameters:
+            # - margin: space between islands
+            # - rotate: allows rotation for better fit (default True)
+            bpy.ops.uv.pack_islands(margin=margin, rotate=True) # PartUV already orients charts? If yes, rotate=False.
+            # If PartUV generates charts randomly oriented, better rotate=True.
             
-            # Torna in Object Mode
+            # Return to Object Mode
             bpy.ops.object.mode_set(mode='OBJECT')
-            logger.info("UV Packing completato.")
+            logger.info("UV Packing completed.")
             return True
             
         except Exception as e:
-            logger.error(f"Errore durante UV Packing: {e}")
-            # Assicurati di uscire dall'Edit Mode anche in caso di errore
+            logger.error(f"Error during UV Packing: {e}")
+            # Ensure exit from Edit Mode even on error
             if bpy.context.object.mode == 'EDIT':
                 bpy.ops.object.mode_set(mode='OBJECT')
             return False

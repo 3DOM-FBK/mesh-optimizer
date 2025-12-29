@@ -3,38 +3,37 @@ import cv2
 import numpy as np
 import logging
 
-# Configurazione logging
+# Logging configuration
 logger = logging.getLogger(__name__)
 
 class RoughnessGenerator:
     """
-    Classe per generare una mappa Roughness partendo da mappe esistenti (Normal o AO).
+    Class to generate a Roughness map starting from existing maps (Normal or AO).
     """
 
     @staticmethod
     def generate_roughness(tex_folder: str, method: str = 'NORMAL'):
         """
-        Genera una mappa Roughness usando il metodo specificato.
+        Generates a Roughness map using the specified method.
         
         Args:
-            tex_folder (str): Percorso della cartella contenente le texture.
-            method (str): 'NORMAL' (basato su curvatura/bordi) o 'AO' (basato su occlusione/sporco).
+            tex_folder (str): Folder containing textures.
+            method (str): 'NORMAL' (based on curvature/edges) or 'AO' (based on occlusion/dirt).
             
         Returns:
-            str: Path della mappa Roughness generata, o None se fallisce.
+            str: Path of generated Roughness map, or None if failed.
         """
         if method.upper() == 'NORMAL':
             return RoughnessGenerator._from_normal(tex_folder)
         elif method.upper() == 'AO':
             return RoughnessGenerator._from_ao(tex_folder)
         else:
-            logger.error(f"Metodo generazione roughness '{method}' non supportato.")
+            logger.error(f"Roughness generation method '{method}' not supported.")
             return None
 
     @staticmethod
     def _from_normal(tex_folder: str):
-        # ... (Logica esistente normal spostata qui, con lievi adattamenti per il logging)
-        # Ricerca file
+        # Search for file
         target_file = RoughnessGenerator._find_map(tex_folder, 'NORMAL')
         if not target_file: return None
         
@@ -64,7 +63,7 @@ class RoughnessGenerator:
 
     @staticmethod
     def _from_ao(tex_folder: str):
-        # Cerca mappa AO
+        # Search for AO map
         target_file = RoughnessGenerator._find_map(tex_folder, 'AO') or RoughnessGenerator._find_map(tex_folder, 'AMBIENT_OCCLUSION')
         if not target_file: return None
         
@@ -75,21 +74,21 @@ class RoughnessGenerator:
             
             ao_f = ao_img.astype(np.float32) / 255.0
             
-            # Logica AO -> Roughness
-            # AO Bassi (Neri/Cavità) -> Sporco/Polvere -> Spesso Ruvido (Roughness Alta/Bianca)
-            # AO Alti (Bianchi/Esposti) -> Puliti/Usurati -> Spesso Lisci (Roughness Bassa/Nera o Media)
+            # Logic AO -> Roughness
+            # Low AO (Black/Cavity) -> Dirt/Dust -> Often Rough (High/White Roughness)
+            # High AO (White/Exposed) -> Clean/Worn -> Often Smooth (Low/Black or Medium Roughness)
             
-            # Invertiamo l'AO: 1.0 - ao
-            # Cavita (0.0) -> Diventa 1.0 (Molto Ruvido)
-            # Superficie (1.0) -> Diventa 0.0 (Molto Liscio)
+            # Invert AO: 1.0 - ao
+            # Cavity (0.0) -> Becomes 1.0 (Very Rough)
+            # Surface (1.0) -> Becomes 0.0 (Very Smooth)
             
-            # Parametrizzazione
-            # Possiamo mappare:
-            # Cavità -> 0.9 (Ruvido)
-            # Superficie -> 0.3 (Satinato base)
+            # Parameterization
+            # Can map:
+            # Cavity -> 0.9 (Rough)
+            # Surface -> 0.3 (Base Satin)
             
             inv_ao = 1.0 - ao_f
-            roughness_final = 0.3 + (inv_ao * 0.6) # Base 0.3, Cavità arrivano a 0.9
+            roughness_final = 0.3 + (inv_ao * 0.6) # Base 0.3, Cavities reach 0.9
             
             roughness_final = np.clip(roughness_final, 0, 1)
              
@@ -121,7 +120,7 @@ class RoughnessGenerator:
              name_part, ext = os.path.splitext(base_name)
              out_name = f"{name_part}_{suffix}{ext}"
              
-        # Fix se il replace case insensitive non ha funzionato bene o se AO è corto
+        # Fix if replace case insensitive failed or AO is short
         if out_name == base_name:
              name_part, ext = os.path.splitext(base_name)
              out_name = f"{name_part}_{suffix}{ext}"

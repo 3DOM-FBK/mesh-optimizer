@@ -1,128 +1,128 @@
 import bpy
 import logging
 
-# Configurazione base del logging
+# Base logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class SceneHelper:
     """
-    Classe helper per la gestione della scena di Blender.
+    Helper class for Blender scene management.
     """
 
     @staticmethod
     def cleanup_scene():
         """
-        Pulisce completamente la scena corrente rimuovendo:
-        - Tutti gli oggetti (MESH, LIGHT, CAMERA, ecc.)
-        - Tutte le collezioni (eccetto la Master Collection se non rimovibile)
-        - Tutti i dati orfani (Mesh, Materiali, Texture, Luci, Camere, Curve, ecc.)
+        Cleanups completely the current scene removing:
+        - All objects (MESH, LIGHT, CAMERA, etc.)
+        - All collections (except Master Collection if not removable)
+        - All orphan data (Mesh, Materials, Textures, Lights, Cameras, Curves, etc.)
         
-        L'obiettivo è ottenere uno stato 'tabula rasa'.
+        The goal is to get a 'tabula rasa' state.
         """
-        logger.info("Avvio pulizia completa della scena...")
+        logger.info("Starting complete scene cleanup...")
 
-        # 1. Rimuovi tutti gli oggetti dalla scena
+        # 1. Remove all objects from scene
         if bpy.context.view_layer.objects:
             bpy.ops.object.select_all(action='SELECT')
             bpy.ops.object.delete(use_global=False)
         
-        # 2. Rimuovi tutte le collezioni (tranne la Scene Collection principale)
+        # 2. Remove all collections (expect main Scene Collection)
         for collection in bpy.data.collections:
             bpy.data.collections.remove(collection)
 
-        # 3. Purge dei data-blocks orfani
-        # Itera su tutte le collezioni di dati e rimuovili se non hanno utenti
-        # Nota: L'ordine è importante per dipendenze (es. materiali usati da mesh)
+        # 3. Purge orphan data-blocks
+        # Iterate over all data collections and remove if no users
+        # Note: Order is important for dependencies (e.g. materials used by mesh)
         
-        # Elimina le mesh
+        # Delete meshes
         for mesh in bpy.data.meshes:
             bpy.data.meshes.remove(mesh)
 
-        # Elimina i materiali
+        # Delete materials
         for mat in bpy.data.materials:
             bpy.data.materials.remove(mat)
 
-        # Elimina le textures
+        # Delete textures
         for tex in bpy.data.textures:
             bpy.data.textures.remove(tex)
             
-        # Elimina le immagini
+        # Delete images
         for img in bpy.data.images:
             bpy.data.images.remove(img)
 
-        # Elimina le luci
+        # Delete lights
         for light in bpy.data.lights:
             bpy.data.lights.remove(light)
 
-        # Elimina le camere
+        # Delete cameras
         for camera in bpy.data.cameras:
             bpy.data.cameras.remove(camera)
             
-        # Elimina le curve
+        # Delete curves
         for curve in bpy.data.curves:
             bpy.data.curves.remove(curve)
 
-        # Un 'purge' finale tramite operatore orfani per sicurezza (più cicli per dipendenze annidate)
+        # Final 'purge' via orphan operator to be safe (multiple cycles for nested dependencies)
         for _ in range(3):
             bpy.ops.outliner.orphans_purge(do_local_ids=True, do_linked_ids=True, do_recursive=True)
 
-        logger.info("Scena pulita con successo.")
+        logger.info("Scene cleaned successfully.")
 
     @staticmethod
     def remove_all_materials(obj: bpy.types.Object):
         """
-        Rimuove tutti i materiali assegnati all'oggetto specificato e pulisce 
-        le texture/immagini collegate se non più utilizzate.
+        Removes all materials assigned to the specified object and cleans
+        linked textures/images if no longer used.
         
         Args:
-            obj (bpy.types.Object): L'oggetto mesh da cui rimuovere i materiali.
+            obj (bpy.types.Object): Mesh object from which to remove materials.
         """
         if obj.type != 'MESH':
-            logger.warning(f"L'oggetto '{obj.name}' non è una mesh. Impossibile rimuovere materiali.")
+            logger.warning(f"Object '{obj.name}' is not a mesh. Cannot remove materials.")
             return
 
-        logger.info(f"Rimozione materiali e texture associate da: {obj.name}")
+        logger.info(f"Removing materials and associated textures from: {obj.name}")
         
-        # Identifica i materiali unici usati da questo oggetto prima di staccarli
+        # Identify unique materials used by this object before detaching
         used_materials = {slot.material for slot in obj.material_slots if slot.material}
         
-        # Rimuovi i materiali dall'oggetto
+        # Remove materials from object
         obj.data.materials.clear()
         
-        # Pulizia mirata: Rimuovi materiali divenuti orfani e le loro immagini
+        # Targeted cleanup: Remove materials became orphans and their images
         for mat in used_materials:
-            # Nota: mat.users potrebbe non essere aggiornato istantaneamente senza trigger, 
-            # ma dopo .clear() solitamente lo è. Se > 0 significa che è usato altrove.
+            # Note: mat.users might not update instantly without trigger,
+            # but after .clear() usually it is. If > 0 means used elsewhere.
             if mat.users == 0:
-                # Cerca immagini nel node tree prima di rimuovere il blocco materiale
+                # Search images in node tree before removing material block
                 images_to_check = set()
                 if mat.use_nodes and mat.node_tree:
                     for node in mat.node_tree.nodes:
                         if node.type == 'TEX_IMAGE' and node.image:
                             images_to_check.add(node.image)
                             
-                logger.info(f"Rimozione materiale orfano: {mat.name}")
+                logger.info(f"Removing orphan material: {mat.name}")
                 bpy.data.materials.remove(mat)
                 
-                # Controlla e rimuovi immagini divenute orfane
+                # Check and remove images became orphans
                 for img in images_to_check:
                     if img.users == 0:
-                        logger.info(f"Rimozione immagine orfana: {img.name}")
+                        logger.info(f"Removing orphan image: {img.name}")
                         bpy.data.images.remove(img)
 
     @staticmethod
     def cleanup_scene_except(keep_obj: bpy.types.Object):
         """
-        Pulisce la scena rimuovendo tutto ECCETTO l'oggetto specificato.
-        Rimuove anche materiali e texture non utilizzati dall'oggetto salvato (tramite orphan purge).
+        Cleans the scene removing everything EXCEPT the specified object.
+        Also removes materials and textures not used by the kept object (via orphan purge).
         
         Args:
-            keep_obj (bpy.types.Object): L'oggetto da preservare.
+            keep_obj (bpy.types.Object): The object to preserve.
         """
-        logger.info(f"Pulizia scena preservando solo: {keep_obj.name}")
+        logger.info(f"Scene cleanup preserving only: {keep_obj.name}")
         
-        # 1. Rimuovi tutti gli oggetti tranne quello da mantenere
+        # 1. Remove all objects except the one to keep
         bpy.ops.object.select_all(action='DESELECT')
         
         objs_to_remove = [o for o in bpy.context.scene.objects if o != keep_obj]
@@ -132,16 +132,15 @@ class SceneHelper:
                 o.select_set(True)
             bpy.ops.object.delete()
             
-        # 2. Rimuovi collezioni vuote (opzionale, ma pulito)
-        # Non rimuovere la master collection o quella dove sta l'oggetto
-        # Per semplicità, spesso basta purge orphans per dati, le collection vuote non pesano.
+        # 2. Remove empty collections (optional, but clean)
+        # Don't remove master collection or where object resides
+        # For simplicity, purge orphans handles data, empty collections don't weigh much.
         
-        # 3. Purge Orphans per rimuovere Mesh, Materiali e Texture non più usati
-        # Poiché abbiamo cancellato gli oggetti che usavano i 'vecchi' materiali, 
-        # il purge li troverà come orfani (0 utenti) e li rimuoverà.
-        # I materiali dell'oggetto 'keep_obj' hanno ancora 1 utente, quindi restano.
+        # 3. Purge Orphans to remove Mesh, Materials and Textures no longer used
+        # Since we deleted objects using 'old' materials,
+        # purge will find them as orphans (0 users) and remove them.
+        # Materials of 'keep_obj' still have 1 user, so they remain.
         for _ in range(3):
             bpy.ops.outliner.orphans_purge(do_local_ids=True, do_linked_ids=True, do_recursive=True)
             
-        logger.info("Pulizia parziale completata.")
-
+        logger.info("Partial cleanup completed.")
