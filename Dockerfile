@@ -110,5 +110,11 @@ RUN pip install partuv
 RUN pip uninstall -y numpy && \
     pip install "numpy<2.0"
 
+WORKDIR /app
+COPY main.py .
+COPY pipeline ./pipeline
+COPY config/config_partuv.yaml ./config/config_partuv.yaml
+COPY c++/cgal/build/remesh /opt
+
 # Comando di default
 CMD ["/bin/bash"]
