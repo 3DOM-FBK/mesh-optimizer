@@ -1,102 +1,105 @@
-# mesh-optimizer – 3D Mesh Optimization Pipeline
+# Mesh Optimizer
 
-Modular pipeline for automated optimization of 3D meshes (input: OBJ, GLB, GLTF).
-The project orchestrates a sequence of steps — cleaning, remeshing, decimation, material improvement, and format conversion — through a main script and Python modules executed (typically) inside Blender or with standard Python, C++ libraries.
-The project is designed for reproducible execution (e.g., in Docker).
+**A comprehensive, automated pipeline for 3D mesh optimization, designed for high-throughput processing of 3D assets.**
 
----
+This repository hosts a robust Python-based orchestration pipeline that leverages **Blender**, **CGAL**, and machine learning techniques to optimize 3D models. It covers the entire lifecycle of mesh optimization: from geometry cleaning and isotropic remeshing to UV unwrapping, texture baking, and final decimation.
 
-## General Features
-
-- Automatic and repeatable execution of an optimization sequence for one or multiple models.
-- Support for various input/output formats (OBJ, GLTF/GLB, FBX).
-- Integration of high-performance tools for remeshing and geometric transformations.
-- Generation and management of material maps (AO, Roughness, etc.).
-- Centralized configuration through YAML and detailed logging.
+Developed by the **3DOM** unit at **FBK** (Fondazione Bruno Kessler).
 
 ---
 
-## Starting from main.py
+## 🚀 Key Features
 
-main.py is the entry point and orchestrator of the pipeline. Its main responsibilities include:
-- Loading configuration settings (e.g., config/config.yaml) and validating parameters.
-- Setting up logging and the working/output folder structure.
-- For each input model, executing the configured sequence of steps (cleaning → remesh → decimate → material → export).
-- Calling Python modules located in the pipelines folder and, if configured, external executables (native remesher).
-- Handling errors and applying retry/skip policies for failed steps.
-
----
-
-## Features in the pipelines Folder
-
-The pipelines folder contains the scripts/modules implementing each step of the pipeline.
-Below are the main functionalities per module (note: the deprecated and c++ folders are excluded):
-
-- preprocess_model.py
-  - Imports the model into Blender or via Python libraries.
-  - Removes disconnected/isolated geometry, duplicate vertices, and degenerate faces.
-  - Applies transformations (scale/rotation), basic unwrapping, and triangulation.
-  - Exports the “cleaned” mesh for the following steps.
-
-- remesh.py
-  - Interfaces with the external remeshing executable — MMG Library.
-  - Adaptive parameters for controlling face density, edge preservation, and triangulation quality.
-  - Produces meshes with regular topology suitable for decimation and texture baking.
-
-- decimate.py
-  - Applies decimation algorithms (Blender modifier).
-  - Supports percentage thresholds or a target triangle count.
-  - Preserves UVs and minimizes visual artifacts.
-
-- texture_generator.py
-  - Bakes maps such as Ambient Occlusion, Normal map, Roughness, Emission if required.
-  - Cleans and normalizes textures, converts channels, and optimizes images (resolution reduction, compression).
-  - Generates standardized PBR materials.
-  - Manages texture paths and relative/absolute references.
-  - Options to embed textures or save them as separate files.
+*   **Automated Workflow**: Seamlessly orchestrates multiple complex processing steps (Cleanup $\rightarrow$ Remeshing $\rightarrow$ Decimation $\rightarrow$ UV $\rightarrow$ Baking).
+*   **High-Quality Remeshing**: Integrates **CGAL** for heavy-duty adaptive isotropic remeshing, creating clean and regular topology suitable for simulation and baking.
+*   **Intelligent Decimation**: Preserves visual fidelity while reducing polygon counts using configurable presets (`LOW`, `MEDIUM`, `HIGH`).
+*   **Advanced UV Unwrapping**: Utilizes **PartUV** (Machine Learning) for semantic part segmentation and optimized UV island packing, ensuring efficient texture space usage.
+*   **PBR Texture Baking**: Automatically bakes high-resolution geometric details (Normal, Ambient Occlusion, Roughness) onto the optimized low-poly mesh.
+*   **Format Support**: Robust handling of standard formats like **OBJ**, **GLB**, and **GLTF**.
+*   **Containerized**: Fully Dockerized for reproducible, dependency-free execution on any infrastructure (with GPU support).
 
 ---
 
-## How the Pipeline Is Organized (Typical Workflow)
+## 🛠️ Pipeline Architecture
 
-1. main.py loads configuration and creates the working directory.
-2. preprocess_model → produces the cleaned mesh.
-3. remesh → (optional) advanced remeshing.
-4. decimate → reduces polygons according to the target.
-5. texture_generator → texture baking, optimization and export to the final format.
-6. file_conversion → export to the final format.
+The pipeline follows a rigorous sequence of operations to ensure quality:
+
+1.  **Import & Cleanup**: Input models are imported and sanitized. This includes removing isolated vertices, degenerate faces, and duplicate geometry.
+2.  **Preprocessing**: Geometry is scaled and prepared for the optimization loop.
+3.  **Adaptive Remeshing**: The high-poly mesh is remeshed using CGAL to ensure uniform edge lengths and regular topology.
+4.  **Initial Decimation**: Geometry is reduced to a manageable intermediate target (e.g., 300k faces) to facilitate efficient UV generation.
+5.  **UV Generation**: **PartUV** is invoked to segment the mesh and generate UV maps based on semantic understanding of the shape.
+6.  **Texture Baking**: Comparison between the original High-Poly mesh and the new Low-Poly mesh generates detailed PBR maps (Normal, AO, Roughness).
+7.  **Final Decimation**: The mesh is further optimized based on the selected quality target/preset.
+8.  **Export**: The final asset is packaged and exported as a GLB file with embedded textures.
 
 ---
 
-## Where to Look for Further Details
+## 📦 Installation & Usage
 
-- main.py — pipeline orchestration and configuration.
-- pipelines/preprocess_model.py, pipelines/remesh.py, pipelines/decimate.py, pipelines/texture_generator.py — implementation of each step.
-- config/config.yaml — parameters and execution sequence.
+The recommended way to run Mesh Optimizer is via **Docker** to handle the complex C++ and Python dependencies (Blender, CGAL, PyTorch).
 
-## Running with Docker
-The pipeline is available as a Docker image on Docker Hub, which allows you to run the code in a reproducible environment with all dependencies pre-installed.
+### 🐳 Docker Usage
 
-- **Docker image**: 3domfbk/mesh-optimizer:21112025
+To run the pipeline using the official image:
 
-#### Basic usage
-To run the container with GPU support and mount your data folder:
-```
-docker run --rm -it --gpus all -v <local_data_path>:<container_data_path> 3domfbk/mesh-optimizer:21112025 -h
+```bash
+docker run --rm -it --gpus all \
+  -v /path/to/local/data:/data \
+  3domfbk/mesh-optimizer:30122025 \
+  --config /data/config.yaml
 ```
 
-## Config example:
+**Parameters:**
+*   `--gpus all`: Required for CUDA-accelerated texture baking and PartUV inference.
+*   `-v`: Mounts your local data directory into the container.
+
+### 🐍 Local Python Usage
+
+If running locally (requires Blender 3.x/4.x in PATH and configured Python environment):
+
+```bash
+python main.py --config config/config.yaml
 ```
-# Pipeline Global Config - Optimization model
+
+---
+
+## ⚙️ Configuration
+
+The pipeline is controlled via a simple YAML configuration file.
+
+**Example `config.yaml`:**
+
+```yaml
+# Pipeline Global Config
 pipeline:
-  image_size: 2048                          # resolution of output images
-  output_dir: "/data/output/New_Test"       # output folder for processed files
-  quality: "medium"                         # define decimation quality preset: high, medium and low
-  remesh: false                             # enable/disable remeshing step
-  verbose: 0
+  image_resolution: 2048                # Output Texture size: 1024, 2048, 4096
+  output_dir: "/data/output/optimized"  # Destination for processed files
+  quality: "MEDIUM"                     # Optimization target: LOW, MEDIUM, HIGH
 
 models:
-  - path: "/data/input/glb/building.glb"
-  # - path: "/data/input/glb/casa.glb"
-  # - path: "/data/input/glb/Surdulica.glb"
-  ```
+  - path: "/data/input/scanned_statue.obj"
+  - path: "/data/input/building_scan.glb"
+  # - path: "/data/input/another_mesh.obj"
+```
+
+| Parameter | Options | Description |
+| :--- | :--- | :--- |
+| `image_resolution` | `1024`, `2048`, `4096` | Resolution of the baked texture maps. |
+| `quality` | `LOW`, `MEDIUM`, `HIGH` | Controls the target face count for the final decimation. |
+
+---
+
+## 📚 Citations & Acknowledgments
+
+This project integrates several open-source technologies and research works. If you use this pipeline in your research or work, please acknowledge the following:
+
+*   **Blender**: The core 3D processing engine. [https://www.blender.org/](https://www.blender.org/)
+*   **CGAL**: The Computational Geometry Algorithms Library, used for high-fidelity remeshing. [https://www.cgal.org/](https://www.cgal.org/)
+*   **PartUV**: Utilized for semantic UV segmentation and packing.
+    *   *Reference*: [PartUV Repository / Paper](https://github.com/EricWang12/PartUV)
+*   **Objaverse**: Provide data foundations for trained checkpoints used in segmentation.
+
+---
+
+*© 3DOM - FBK. All rights reserved.*
