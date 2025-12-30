@@ -1,12 +1,9 @@
 # Pipeline Global Config - Optimization model
 pipeline:
-  image_size: 2048                          # resolution of output images
-  output_dir: "/data/output/New_Test"       # output folder for processed files
-  quality: "medium"                         # define decimation quality preset: high, medium and low
-  remesh: false                             # enable/disable remeshing step
-  verbose: 0
+  image_resolution: 1024                      # resolution of output images
+  output_dir: "/data/optimize/output/"        # output folder for processed files
+  quality: "medium"                           # define decimation quality preset: high, medium and low
 
 models:
-  - path: "/data/input/glb/building.glb"
-  # - path: "/data/input/glb/casa.glb"
-  # - path: "/data/input/glb/Surdulica.glb"
+  - path: "/data/optimize/input/glb/447fdb1e91324d73aa801a3269c56233.glb"
+  # - path: "/data/optimize/input/glb/bfd71c1193d74698b008561c1aac7447.glb"
