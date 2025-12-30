@@ -15,7 +15,7 @@ Developed by the **3DOM** unit at **FBK** (Fondazione Bruno Kessler).
 *   **Intelligent Decimation**: Preserves visual fidelity while reducing polygon counts using configurable presets (`LOW`, `MEDIUM`, `HIGH`).
 *   **Advanced UV Unwrapping**: Utilizes **PartUV** (Machine Learning) for semantic part segmentation and optimized UV island packing, ensuring efficient texture space usage.
 *   **PBR Texture Baking**: Automatically bakes high-resolution geometric details (Normal, Ambient Occlusion, Roughness) onto the optimized low-poly mesh.
-*   **Format Support**: Robust handling of standard formats like **OBJ**, **GLB**, and **GLTF**.
+*   **Format Support**: Strictly supports **GLB** and **GLTF** formats for input meshes. Output is provided in GLB format.
 *   **Containerized**: Fully Dockerized for reproducible, dependency-free execution on any infrastructure (with GPU support).
 
 ---
@@ -78,9 +78,9 @@ pipeline:
   quality: "MEDIUM"                     # Optimization target: LOW, MEDIUM, HIGH
 
 models:
-  - path: "/data/input/scanned_statue.obj"
-  - path: "/data/input/building_scan.glb"
-  # - path: "/data/input/another_mesh.obj"
+  - path: "/data/input/statue_scan.glb"
+  - path: "/data/input/building_model.gltf"
+  # - path: "/data/input/another_mesh.glb"
 ```
 
 | Parameter | Options | Description |
