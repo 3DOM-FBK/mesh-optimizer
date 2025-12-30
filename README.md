@@ -73,20 +73,38 @@ The pipeline is controlled via a simple YAML configuration file.
 ```yaml
 # Pipeline Global Config
 pipeline:
-  image_resolution: 2048                # Output Texture size: 1024, 2048, 4096
+  input_folder: "/data/input/glb/"      # Folder containing .glb files to process
   output_dir: "/data/output/optimized"  # Destination for processed files
+  image_resolution: 2048                # Output Texture size: 1024, 2048, 4096
   quality: "MEDIUM"                     # Optimization target: LOW, MEDIUM, HIGH
 
-models:
-  - path: "/data/input/statue_scan.glb"
-  - path: "/data/input/building_model.gltf"
-  # - path: "/data/input/another_mesh.glb"
+  # Remeshing Parameters (Optional - Advanced)
+  remesh:
+    tolerance: 0.001          # Approximation tolerance (curvature adaptation)
+    edge_min: null            # Min edge length (null = auto: 0.1% bbox diag)
+    edge_max: null            # Max edge length (null = auto: 5% bbox diag)
+    iterations: 5             # Number of remeshing iterations
+
+  # Final Decimation Parameters (Optional - Advanced)
+  decimation:
+    hausdorff_threshold: 0.001 # Max geometric deviation for final reduction
 ```
 
-| Parameter | Options | Description |
-| :--- | :--- | :--- |
-| `image_resolution` | `1024`, `2048`, `4096` | Resolution of the baked texture maps. |
-| `quality` | `LOW`, `MEDIUM`, `HIGH` | Controls the target face count for the final decimation. |
+> **Note:** The `models` list is supported for legacy compatibility but `input_folder` is preferred for batch processing.
+
+### Parameter Reference
+
+| Section | Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **Pipeline** | `input_folder` | `string` | - | Directory path containing `.glb` files to optimize. |
+| | `output_dir` | `string` | `./output` | Root directory where optimized files and subfolders will be saved. |
+| | `image_resolution` | `int` | `2048` | Resolution (width/height) of the baked texture maps. |
+| | `quality` | `string` | `MEDIUM` | Preset for final polygon count (`LOW`, `MEDIUM`, `HIGH`). |
+| **Remesh** | `tolerance` | `float` | `0.001` | Controls how closely the new topology follows surface curvature. |
+| | `edge_min` | `float` | `null` | Minimum allowed edge length. If `null`, calculated automatically. |
+| | `edge_max` | `float` | `null` | Maximum allowed edge length. If `null`, calculated automatically. |
+| | `iterations` | `int` | `5` | Number of relaxation iterations for the remeshing algorithm. |
+| **Decimation**| `hausdorff_threshold`| `float` | `0.001` | Maximum allowed distance deviation during the final simplification step. |
 
 ---
 

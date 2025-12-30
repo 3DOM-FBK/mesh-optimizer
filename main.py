@@ -1,6 +1,7 @@
 import argparse
 import yaml
 import os
+import glob
 import sys
 import subprocess
 import logging
@@ -33,11 +34,31 @@ def run_blender_pipeline(config):
     output_base_dir = pipeline_conf.get('output_dir', './output')
     quality = pipeline_conf.get('quality', 'MEDIUM').upper()
     image_resolution = pipeline_conf.get('image_resolution', 2048)
+    remesh_conf = pipeline_conf.get('remesh', {})
+    decim_conf = pipeline_conf.get('decimation', {}) # FIX
+    input_folder = pipeline_conf.get('input_folder')
     
-    models = config.get('models', [])
+    models = []
+    
+    if input_folder:
+        if not os.path.exists(input_folder):
+            logger.error(f"Input folder not found: {input_folder}")
+            return
+            
+        glb_files = glob.glob(os.path.join(input_folder, "*.glb"))
+        if not glb_files:
+            logger.warning(f"No .glb files found in {input_folder}")
+            return
+            
+        logger.info(f"Found {len(glb_files)} files in {input_folder}")
+        # Convert to list of dicts to match previous structure
+        models = [{'path': f} for f in glb_files]
+    else:
+        # Legacy support
+        models = config.get('models', [])
     
     if not models:
-        logger.warning("No models found in config.")
+        logger.warning("No models found in config (checked 'input_folder' and 'models').")
         return
 
     # Blender command detection (assuming it's in PATH)
@@ -73,6 +94,23 @@ def run_blender_pipeline(config):
             "--image_resolution", str(image_resolution)
         ]
         
+        # Add Remesh Override Parameters if present
+        if 'tolerance' in remesh_conf and remesh_conf['tolerance'] is not None:
+             cmd.extend(["--remesh_tolerance", str(remesh_conf['tolerance'])])
+             
+        if 'edge_min' in remesh_conf and remesh_conf['edge_min'] is not None:
+             cmd.extend(["--remesh_edge_min", str(remesh_conf['edge_min'])])
+             
+        if 'edge_max' in remesh_conf and remesh_conf['edge_max'] is not None:
+             cmd.extend(["--remesh_edge_max", str(remesh_conf['edge_max'])])
+             
+        if 'iterations' in remesh_conf and remesh_conf['iterations'] is not None:
+             cmd.extend(["--remesh_iterations", str(remesh_conf['iterations'])])
+        
+        # Add Decimation Override Parameters
+        if 'hausdorff_threshold' in decim_conf and decim_conf['hausdorff_threshold'] is not None:
+             cmd.extend(["--final_hausdorff", str(decim_conf['hausdorff_threshold'])])
+
         # logger.info(f"Executing command: {' '.join(cmd)}")
         
         try:

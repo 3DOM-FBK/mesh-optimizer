@@ -1,9 +1,12 @@
-# Pipeline Global Config - Optimization model
 pipeline:
-  image_resolution: 1024                      # resolution of output images
-  output_dir: "/data/optimize/output/"        # output folder for processed files
-  quality: "medium"                           # define decimation quality preset: high, medium and low
-
-models:
-  - path: "/data/optimize/input/glb/447fdb1e91324d73aa801a3269c56233.glb"
-  # - path: "/data/optimize/input/glb/bfd71c1193d74698b008561c1aac7447.glb"
+  input_folder: "/data/optimize/input/glb/"
+  output_dir: "/data/optimize/output/"
+  image_resolution: 2048
+  quality: "medium"
+  decimation:
+    hausdorff_threshold: 0.001 # Max deviation for final decimation
+  remesh:
+    tolerance: 0.001
+    edge_min: null    # auto: 0.1% of bbox diagonal
+    edge_max: null    # auto: 5% of bbox diagonal
+    iterations: 5

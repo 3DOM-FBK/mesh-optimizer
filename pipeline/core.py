@@ -63,7 +63,9 @@ def ensure_checkpoint_exists(base_dir: str):
         
     return ckpt_path
 
-def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM", image_resolution: int = 2048):
+def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM", image_resolution: int = 2048,
+         remesh_tolerance=None, remesh_edge_min=None, remesh_edge_max=None, remesh_iterations=None,
+         final_hausdorff=None):
     """
     Robust mesh optimization pipeline.
     Interrupts execution in case of critical error at any stage.
@@ -145,7 +147,43 @@ def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM", 
             # 5. Remeshing
             logger.info(f"Phase 5 [{safe_name}]: CGAL Remeshing")
             temp_remeshed = os.path.join(temp_dir, f"{base_name}_remeshed.obj")
-            remeshed_path = CgalRemesher.adaptive_remesh(temp_hp, temp_remeshed, detail_level="high", iterations=5)
+            
+            # Parametri Remesh: Use passed args or defaults (calculated or preset)
+            # Default tolerance if not specified is 0.001
+            r_tol = remesh_tolerance if remesh_tolerance is not None else 0.001
+            
+            # Default iterations if not specified is 5
+            r_iter = int(remesh_iterations) if remesh_iterations is not None else 5
+            
+            r_min = remesh_edge_min
+            r_max = remesh_edge_max
+            
+            # Se edge_min/max non sono specificati MA vogliamo invocare il remesher con parametri specifici
+            # (es. se vogliamo custom iter o tolerance), calcoliamo i default AUTO qui in Python
+            # per passarli esplicitamente.
+            # Questo serve perch il wrapper/binario richiede tutti i parametri se se ne passano alcuni avanzati.
+            
+            if r_min is None or r_max is None:
+                # Calcolo BBox Diagonal per Auto-Values
+                bbox = hp_mesh.dimensions
+                import math
+                diag = math.sqrt(bbox.x**2 + bbox.y**2 + bbox.z**2)
+                
+                if r_min is None: r_min = diag * 0.001  # 0.1%
+                if r_max is None: r_max = diag * 0.05   # 5%
+            
+            # logger.info(f"Remesh Params: Tol={r_tol}, Min={r_min}, Max={r_max}, Iter={r_iter}")
+            
+            # Use raw remesh instead of adaptive_remesh to control specific params
+            remeshed_path = CgalRemesher.remesh(
+                temp_hp, 
+                temp_remeshed, 
+                tolerance=r_tol, 
+                edge_min=r_min, 
+                edge_max=r_max, 
+                iterations=r_iter
+            )
+            
             if not remeshed_path:
                 raise RuntimeError(f"Remeshing failed for {safe_name}")
                 
@@ -237,7 +275,11 @@ def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM", 
                 
             # 11. Final Decimation
             logger.info(f"Phase 11 [{safe_name}]: Final Decimation (Preset: {decimation_presets})")
-            if not MeshDecimator.apply_decimate(lp_mesh, preset=decimation_presets, custom_target=300000, hausdorf_threshold=0.001):
+            
+            # Use provided hausdorff or default 0.001
+            h_thresh = final_hausdorff if final_hausdorff is not None else 0.001
+            
+            if not MeshDecimator.apply_decimate(lp_mesh, preset=decimation_presets, custom_target=300000, hausdorf_threshold=h_thresh):
                 raise RuntimeError(f"Final decimation failed for {safe_name} (Preset: {decimation_presets})")
             
             lp_mesh.name = f"Optimized_{safe_name}"
@@ -288,6 +330,15 @@ if __name__ == "__main__":
     parser.add_argument("--decimation_presets", type=str, default="MEDIUM", help="Decimation Preset (LOW, MEDIUM, HIGH, CUSTOM)")
     parser.add_argument("--image_resolution", type=int, default=2048, help="Image resolution")
     
+    # Remesh arguments
+    parser.add_argument("--remesh_tolerance", type=float, default=None, help="Remesh tolerance")
+    parser.add_argument("--remesh_edge_min", type=float, default=None, help="Remesh edge min")
+    parser.add_argument("--remesh_edge_max", type=float, default=None, help="Remesh edge max")
+    parser.add_argument("--remesh_iterations", type=int, default=None, help="Remesh iterations")
+    
+    # Decimation arguments
+    parser.add_argument("--final_hausdorff", type=float, default=None, help="Final decimation Hausdorff threshold")
+    
     args = parser.parse_args(argv)
     
     # Create output directory based on input filename
@@ -296,4 +347,9 @@ if __name__ == "__main__":
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
-    main(args.input, output_dir, args.decimation_presets, args.image_resolution)
+    main(args.input, output_dir, args.decimation_presets, args.image_resolution,
+         remesh_tolerance=args.remesh_tolerance,
+         remesh_edge_min=args.remesh_edge_min,
+         remesh_edge_max=args.remesh_edge_max,
+         remesh_iterations=args.remesh_iterations,
+         final_hausdorff=args.final_hausdorff)
