@@ -120,4 +120,5 @@ This project integrates several open-source technologies and research works. If 
 
 ---
 
-*© 3DOM - FBK. All rights reserved.*
+*Licensed under the [MIT License](LICENSE).*
+*© 2026 3DOM - FBK.*
