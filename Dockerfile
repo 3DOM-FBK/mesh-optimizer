@@ -76,7 +76,8 @@ RUN wget https://download.blender.org/release/Blender5.0/blender-5.0.0-linux-x64
     mv blender-5.0.0-linux-x64 blender
 
 # Add Blender to PATH
-ENV PATH="/opt/blender:$PATH"
+ENV PATH="/opt/blender:$PATH" \
+    LD_LIBRARY_PATH="/opt/blender/lib:$LD_LIBRARY_PATH"
 
 # Install gmsh in Blender's Python environment
 RUN /opt/blender/*/python/bin/python3* -m ensurepip && \

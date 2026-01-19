@@ -243,25 +243,29 @@ def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM", 
                 
             # 9. Baking
             logger.info(f"Phase 9 [{safe_name}]: Baking Maps")
+            uniform_vals = {}
             try:
                 from tex_baker import TextureAnalyzer, TextureBaker
                 out_dir = os.path.dirname(output_path) if os.path.splitext(output_path)[1] else output_path
                 mesh_tex_dir = os.path.join(out_dir, f"tex_{safe_name}")
                 
-                mat_analysis = TextureAnalyzer.analyze_mesh_materials(hp_mesh)
-                all_maps = set()
-                for m in mat_analysis.values(): 
-                    if m: all_maps.update(m['maps'].keys())
+                # Analyze materials to decide what to bake vs keep uniform
+                active_maps, uniform_vals = TextureAnalyzer.analyze_mesh_materials(hp_mesh)
                 
-                if all_maps:
+                # If there are maps to bake
+                if active_maps:
                     # Use passed image_resolution
                     baker = TextureBaker(resolution=image_resolution, margin="infinite")
-                    baked = baker.bake_all(hp_mesh, lp_mesh, list(all_maps))
+                    baked = baker.bake_all(hp_mesh, lp_mesh, list(active_maps))
                     MeshIO.save_images_to_dir(baked, mesh_tex_dir)
                     
-                    if 'ROUGHNESS' not in all_maps:
+                    # Generate Roughness from AO if:
+                    # 1. ROUGHNESS map was not baked (active_maps)
+                    # 2. ROUGHNESS uniform value was NOT found (uniform_vals)
+                    if 'ROUGHNESS' not in active_maps and 'ROUGHNESS' not in uniform_vals:
                         from roughness_gen import RoughnessGenerator
                         RoughnessGenerator.generate_roughness(mesh_tex_dir, method='AO')
+                        
             except Exception as e:
                 raise RuntimeError(f"Baking failed for {safe_name}: {e}")
 
@@ -269,7 +273,7 @@ def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM", 
             logger.info(f"Phase 10 [{safe_name}]: Assemble Materials")
             try:
                 from material_assembler import MaterialAssembler
-                MaterialAssembler.assemble_material(lp_mesh, mesh_tex_dir)
+                MaterialAssembler.assemble_material(lp_mesh, mesh_tex_dir, uniform_props=uniform_vals)
             except Exception as e:
                 raise RuntimeError(f"Material Assembly failed for {safe_name}: {e}")
                 

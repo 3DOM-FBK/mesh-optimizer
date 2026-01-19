@@ -24,11 +24,11 @@ class TextureAnalyzer:
     # Note: We use this to infer which maps are needed
     CHANNEL_HINTS = {
         'DIFFUSE':  {'nodes': ['BSDF_DIFFUSE', 'BSDF_PRINCIPLED'], 'sockets': ['Base Color', 'Color', 'Diffuse']},
-        'ROUGHNESS': {'nodes': ['BSDF_GLOSSY', 'BSDF_PRINCIPLED'], 'sockets': ['Roughness']},
-        'METALLIC': {'nodes': ['BSDF_PRINCIPLED'], 'sockets': ['Metallic']},
+        'ROUGHNESS': {'nodes': ['BSDF_GLOSSY'], 'sockets': ['Roughness']},
+        'METALLIC': {'nodes': [], 'sockets': ['Metallic']},
         'NORMAL':   {'nodes': ['NORMAL_MAP', 'BUMP'], 'sockets': ['Normal']},
-        'EMISSION': {'nodes': ['EMISSION', 'BSDF_PRINCIPLED'], 'sockets': ['Emission', 'Emission Color', 'Emission Strength']},
-        'OPACITY':  {'nodes': ['BSDF_TRANSPARENT', 'BSDF_PRINCIPLED'], 'sockets': ['Alpha', 'Transmission', 'Transmission Weight']}
+        'EMISSION': {'nodes': ['EMISSION'], 'sockets': ['Emission', 'Emission Color', 'Emission Strength']},
+        'OPACITY':  {'nodes': ['BSDF_TRANSPARENT'], 'sockets': ['Alpha', 'Transmission', 'Transmission Weight']}
     }
 
     @staticmethod
@@ -146,39 +146,121 @@ class TextureAnalyzer:
                  # If we want to bake flat colors too, enable always.
                  pass
 
+                 # If we want to bake flat colors too, enable always.
+                 pass
+
+    @staticmethod
+    def get_principled_values(material):
+        """
+        Extracts constant float values from Principled BSDF if they exist.
+        Returns dict: {'METALLIC': float, 'ROUGHNESS': float}
+        """
+        values = {}
+        if not material or not material.use_nodes:
+            return values
+            
+        bsdf = None
+        for node in material.node_tree.nodes:
+            if node.type == 'BSDF_PRINCIPLED':
+                bsdf = node
+                break
+        
+        if bsdf:
+            # Metallic
+            if 'Metallic' in bsdf.inputs:
+                values['METALLIC'] = bsdf.inputs['Metallic'].default_value
+            # Roughness
+            if 'Roughness' in bsdf.inputs:
+                values['ROUGHNESS'] = bsdf.inputs['Roughness'].default_value
+                
+        return values
+
     @staticmethod
     def analyze_mesh_materials(obj: bpy.types.Object):
         """
         Analyzes all materials assigned to the mesh.
+        Determines which maps to bake and which can be constant values.
         
         Args:
            obj (bpy.types.Object): Mesh Object.
            
         Returns:
-            dict: Mapping { slot_index: { 'material_name': str, 'maps': dict } }
+            tuple: (
+                set(active_channels_to_bake),
+                dict(uniform_values)  # e.g. {'METALLIC': 0.0, 'ROUGHNESS': 0.5}
+            )
         """
         if obj.type != 'MESH':
             logger.error("Provided object is not a mesh.")
-            return {}
+            return set(), {}
 
-        results = {}
+        # Aggregators
+        consolidated_maps = set()
         
-        for i, slot in enumerate(obj.material_slots):
+        # Track values seen across all materials
+        # key -> list of values
+        observed_values = {
+            'METALLIC': [],
+            'ROUGHNESS': []
+        }
+        
+        has_materials = False
+        
+        for slot in obj.material_slots:
             if slot.material:
-                logger.info(f"Analyzing material slot {i}: {slot.material.name}")
-                maps = TextureAnalyzer.get_material_maps(slot.material)
-                results[i] = {
-                    'material_name': slot.material.name,
-                    'maps': maps
-                }
+                has_materials = True
+                mat = slot.material
+                # logger.info(f"Analyzing material: {mat.name}")
                 
-                # Summary log
-                active_channels = list(maps.keys())
-                logger.info(f"  -> Active channels found: {active_channels}")
+                # 1. Detect Texture/Link based channels
+                maps = TextureAnalyzer.get_material_maps(mat)
+                consolidated_maps.update(maps.keys())
+                
+                # 2. Inspect Constants
+                consts = TextureAnalyzer.get_principled_values(mat)
+                for k, v in consts.items():
+                    observed_values[k].append(v)
             else:
-                results[i] = None
+                # Empty slot behavior? 
+                # Usually implies default material (gray stats).
+                pass
+
+        if not has_materials:
+            return set(['DIFFUSE', 'NORMAL', 'AMBIENT_OCCLUSION']), {}
+
+        final_uniforms = {}
+        
+        # Post-process observed values
+        for channel in ['METALLIC', 'ROUGHNESS']:
+            # If channel is already scheduled for baking (because one material had a link),
+            # we ignore constants (we bake everything into the map).
+            if channel in consolidated_maps:
+                continue
                 
-        return results
+            vals = observed_values[channel]
+            if not vals:
+                continue
+                
+            # Check consistency
+            # If all values are approximately equal, we can use a uniform value.
+            # If they differ significantly, we MUST bake a map to preserve look.
+            first_val = vals[0]
+            is_consistent = True
+            for v in vals[1:]:
+                if abs(v - first_val) > 0.01: # Tolerance
+                    is_consistent = False
+                    break
+            
+            if is_consistent:
+                # Good, no bake needed. Return uniform.
+                final_uniforms[channel] = first_val
+            else:
+                # Bad, different materials have different values.
+                # Must bake to an atlas.
+                logger.info(f"Channel {channel} has mixed constant values across materials. Forcing Bake.")
+                consolidated_maps.add(channel)
+        
+        return consolidated_maps, final_uniforms
 
 
 class TextureBaker:
@@ -275,7 +357,17 @@ class TextureBaker:
             if map_type == 'AMBIENT_OCCLUSION':
                 bpy.context.scene.cycles.samples = 64
             
+            # Special handling for DIFFUSE: Force Metalness to 0 temporarily
+            metalness_state = None
+            if map_type == 'DIFFUSE':
+                metalness_state = self._save_metalness_state(high_poly_obj)
+                self._force_high_poly_metalness_zero(high_poly_obj)
+
             success = self._run_bake_operation(map_type)
+            
+            # Restore Metalness state if it was modified
+            if map_type == 'DIFFUSE' and metalness_state is not None:
+                self._restore_metalness_state(high_poly_obj, metalness_state)
             
             bpy.context.scene.cycles.samples = original_samples
             
@@ -391,6 +483,82 @@ class TextureBaker:
         suggested = max(result_lh['suggested_distance'], result_hl['suggested_distance'])
         
         return suggested
+
+    def _save_metalness_state(self, obj):
+        """Saves values and links of Metalness sockets."""
+        state = {}
+        if not obj or not obj.data.materials:
+            return state
+            
+        for slot in obj.material_slots:
+            mat = slot.material
+            if mat and mat.use_nodes:
+                mat_state = []
+                for node in mat.node_tree.nodes:
+                    if node.type == 'BSDF_PRINCIPLED' and "Metallic" in node.inputs:
+                        socket = node.inputs["Metallic"]
+                        links_data = []
+                        for link in socket.links:
+                            # Store from_node reference and socket index/name
+                            links_data.append((link.from_node, link.from_socket))
+                        
+                        mat_state.append({
+                            'node': node,
+                            'default_value': socket.default_value,
+                            'links': links_data
+                        })
+                if mat_state:
+                    state[mat.name] = mat_state
+        return state
+
+    def _restore_metalness_state(self, obj, state):
+        """Restores values and links of Metalness sockets."""
+        if not obj or not state:
+            return
+            
+        for slot in obj.material_slots:
+            mat = slot.material
+            if mat and mat.name in state:
+                mat_state_list = state[mat.name]
+                tree = mat.node_tree
+                
+                for node_data in mat_state_list:
+                    node = node_data['node']
+                    # Verify node still exists
+                    if node and "Metallic" in node.inputs:
+                        socket = node.inputs["Metallic"]
+                        # Restore value
+                        socket.default_value = node_data['default_value']
+                        # Restore links
+                        for from_node, from_socket in node_data['links']:
+                            try:
+                                # from_socket object should still be valid if we didn't remove nodes
+                                tree.links.new(from_socket, socket)
+                            except Exception as e:
+                                logger.warning(f"Could not restore link for {mat.name}: {e}")
+
+    def _force_high_poly_metalness_zero(self, obj):
+        """
+        Sets Metalness to 0.0 for all Principled BSDF nodes in the object's materials.
+        Removes any links to the Metalness input to ensure the value is 0.
+        """
+        if not obj or not obj.data.materials:
+            return
+
+        for slot in obj.material_slots:
+            mat = slot.material
+            if mat and mat.use_nodes:
+                for node in mat.node_tree.nodes:
+                    if node.type == 'BSDF_PRINCIPLED':
+                        if "Metallic" in node.inputs:
+                            socket = node.inputs["Metallic"]
+                            # Set value to 0
+                            socket.default_value = 0.0
+                            # Unlink if necessary
+                            if socket.is_linked:
+                                logger.info(f"Unlinking Metalness map in material {mat.name} to force 0.0")
+                                for link in socket.links:
+                                    mat.node_tree.links.remove(link)
 
 
     def save_maps(self, baked_images, base_output_path):

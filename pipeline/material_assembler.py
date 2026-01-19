@@ -16,7 +16,7 @@ class MaterialAssembler:
     """
 
     @staticmethod
-    def assemble_material(low_poly_obj: bpy.types.Object, tex_dir: str):
+    def assemble_material(low_poly_obj: bpy.types.Object, tex_dir: str, uniform_props: dict = None):
         """
         Cleans the scene keeping only Low Poly, removes its old materials
         and creates a new PBR material linking found textures in the directory.
@@ -24,9 +24,13 @@ class MaterialAssembler:
         Args:
             low_poly_obj (bpy.types.Object): The Low Poly object.
             tex_dir (str): Directory containing generated textures (Diffuse, Normal, etc.)
+            uniform_props (dict): Optional dictionary of uniform values {'METALLIC': 0.0, ...}
         """
         logger.info(f"Starting material assembly for: {low_poly_obj.name}")
         
+        if uniform_props is None:
+            uniform_props = {}
+            
         # 1. Scene Cleanup (DO NOT DO HERE if used in multi-object pipeline)
         # SceneHelper.cleanup_scene_except(low_poly_obj)
         
@@ -56,16 +60,16 @@ class MaterialAssembler:
         # 4. Load and link textures
         if not os.path.exists(tex_dir):
             logger.warning(f"Texture directory not found: {tex_dir}")
-            return
+            # Even if no tex dir, we might want to apply uniforms
+            # But usually tex dir exists.
             
-        texture_files = [f for f in os.listdir(tex_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.exr'))]
+        texture_files = []
+        if os.path.exists(tex_dir):
+            texture_files = [f for f in os.listdir(tex_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.exr'))]
         
         logger.info(f"Found textures: {texture_files}")
         
         # Base mapping of suffixes to Principled BSDF sockets
-        # Adapt based on suffixes used by Baker (e.g. _DIFFUSE, _NORMAL, _ROUGHNESS)
-        # Y coordinates for ordered layout
-        
         map_config = [
             {'patterns': ['DIFFUSE', 'ALBEDO', 'COLOR', 'BASE_COLOR'], 'socket': 'Base Color', 'non_color': False, 'y': 300},
             {'patterns': ['METALLIC', 'METALNESS'], 'socket': 'Metallic', 'non_color': True, 'y': 0},
@@ -73,24 +77,22 @@ class MaterialAssembler:
             {'patterns': ['NORMAL'], 'socket': 'Normal', 'non_color': True, 'is_normal': True, 'y': -600},
             {'patterns': ['AO', 'AMBIENT_OCCLUSION'], 'socket': None, 'non_color': False, 'is_ao': True, 'y': 600}, # AO is mixed
             {'patterns': ['EMISSION', 'EMIT'], 'socket': 'Emission Color', 'non_color': False, 'y': -900},
-            # Opacity/Alpha gestion
+            # Opacity
         ]
         
         # Dictionary to track what we loaded (to handle AO mix later)
         loaded_nodes = {}
         
         for config in map_config:
-            # Find file matching one of the patterns
+            # 1. Try to find texture
             found_file = None
             for f in texture_files:
                 for pat in config['patterns']:
-                    # Robust check: must contain pattern
-                    # Supports: "_NORMAL.", "-Diff.", "DIFFUSE.png" (file starting with pattern)
                     f_upper = f.upper()
                     pat_upper = pat.upper()
                     if (f"_{pat_upper}" in f_upper or 
                         f"-{pat_upper}" in f_upper or 
-                        f_upper.startswith(pat_upper) or  # File starting with pattern (e.g. DIFFUSE.png)
+                        f_upper.startswith(pat_upper) or  
                         f_upper == f"{pat_upper}.PNG" or f_upper == f"{pat_upper}.JPG" or 
                         f_upper == f"{pat_upper}.JPEG" or f_upper == f"{pat_upper}.TIF" or 
                         f_upper == f"{pat_upper}.EXR"):
@@ -98,6 +100,7 @@ class MaterialAssembler:
                         break
                 if found_file: break
             
+            # 2. If texture found, load it
             if found_file:
                 path = os.path.join(tex_dir, found_file)
                 logger.info(f"Loading texture: {found_file} -> {config.get('socket', 'Special')}")
@@ -123,16 +126,13 @@ class MaterialAssembler:
                         
                     # AO Handling
                     elif config.get('is_ao'):
-                        # Do not link anything here, handled later in dedicated glTF block
                         pass
                         
                     # Standard Linking
                     elif config.get('socket'):
-                        # Verify socket exists (blender versions compatibility)
                         if config['socket'] in bsdf_node.inputs:
                             links.new(tex_node.outputs['Color'], bsdf_node.inputs[config['socket']])
                             
-                            # Specific logic for Emission: strength to 1.0 if texture is present
                             if config['socket'] == 'Emission Color' and 'Emission Strength' in bsdf_node.inputs:
                                 bsdf_node.inputs['Emission Strength'].default_value = 1.0
                         else:
@@ -140,6 +140,21 @@ class MaterialAssembler:
                             
                 except Exception as e:
                     logger.error(f"Error loading texture {found_file}: {e}")
+            
+            # 3. If NO texture found, check if we have a uniform value
+            else:
+                # Check based on pattern keys (e.g. METALLIC)
+                key_found = False
+                for pat in config['patterns']:
+                    if pat in uniform_props:
+                        # Found a uniform value!
+                        val = uniform_props[pat]
+                        sock_name = config.get('socket')
+                        if sock_name and sock_name in bsdf_node.inputs:
+                            logger.info(f"Applying uniform value for {sock_name}: {val}")
+                            bsdf_node.inputs[sock_name].default_value = val
+                            key_found = True
+                        break
 
         # Post-Processing special links (AO for glTF Export)
         if 'AO' in loaded_nodes: # Key patterns[0]

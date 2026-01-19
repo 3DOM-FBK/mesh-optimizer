@@ -1,6 +1,6 @@
 pipeline:
-  input_folder: "/data/optimize/input/glb/"
-  output_dir: "/data/optimize/output/"
+  input_folder: "/data/input/debug/"
+  output_dir: "/data/output/"
   image_resolution: 2048
   quality: "medium"
   decimation:
