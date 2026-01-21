@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y \
     libmpfr-dev \
     libtbb-dev \
     libeigen3-dev \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # # --- MMG Tools Installation ---

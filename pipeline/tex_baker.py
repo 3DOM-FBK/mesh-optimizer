@@ -231,7 +231,9 @@ class TextureAnalyzer:
         final_uniforms = {}
         
         # Post-process observed values
-        for channel in ['METALLIC', 'ROUGHNESS']:
+        # We exclude ROUGHNESS here because we want to force AO-based generation 
+        # if no specific texture is linked (ignoring constant values).
+        for channel in ['METALLIC']:
             # If channel is already scheduled for baking (because one material had a link),
             # we ignore constants (we bake everything into the map).
             if channel in consolidated_maps:

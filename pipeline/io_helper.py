@@ -103,7 +103,18 @@ class MeshIO:
                     bpy.ops.export_scene.obj(filepath=output_path, use_selection=True)
                     
             elif ext in ['.glb', '.gltf']:
-                bpy.ops.export_scene.gltf(filepath=output_path, use_selection=True)
+                # Enable Draco Compression for GLB/GLTF export
+                bpy.ops.export_scene.gltf(
+                    filepath=output_path, 
+                    use_selection=True,
+                    export_draco_mesh_compression_enable=True,
+                    export_draco_mesh_compression_level=6,
+                    export_draco_position_quantization=14,
+                    export_draco_normal_quantization=10,
+                    export_draco_texcoord_quantization=12,
+                    export_draco_color_quantization=10,
+                    export_draco_generic_quantization=10
+                )
             else:
                 logger.error(f"Extension not recognized for export: {ext}")
                 return False
@@ -116,7 +127,7 @@ class MeshIO:
             return False
 
     @staticmethod
-    def save_images_to_dir(images_dict: dict, output_dir: str, format: str = 'PNG') -> List[str]:
+    def save_images_to_dir(images_dict: dict, output_dir: str, format: str = 'JPEG') -> List[str]:
         """
         Saves a dictionary of bpy.types.Image objects to disk.
         
@@ -146,7 +157,8 @@ class MeshIO:
             if not img: continue
             
             # Construct filename
-            filename = f"{map_name}.{format.lower()}"
+            ext = 'jpg' if format == 'JPEG' else format.lower()
+            filename = f"{map_name}.{ext}"
             filepath = os.path.join(output_dir, filename)
             
             # Set filepath on image for save_render
