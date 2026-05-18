@@ -119,6 +119,3 @@ This project integrates several open-source technologies and research works. If 
 *   **Objaverse**: Provide data foundations for trained checkpoints used in segmentation.
 
 ---
-
-*Licensed under the [MIT License](LICENSE).*
-*© 2026 3DOM - FBK.*
