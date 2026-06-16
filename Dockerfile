@@ -119,6 +119,7 @@ RUN pip uninstall -y numpy && \
 WORKDIR /app
 COPY main.py .
 COPY pipeline ./pipeline
+COPY config/config.yaml ./config/config.yaml
 COPY config/config_partuv.yaml ./config/config_partuv.yaml
 COPY c++/cgal/build/remesh /opt
 
