@@ -333,9 +333,33 @@ class TextureBaker:
         bpy.ops.mesh.mark_sharp(clear=True)
         bpy.ops.object.mode_set(mode='OBJECT')
         
-        # Remove custom split normals if present, to avoid conflicts with smooth shading
-        if low_poly_obj.data.has_custom_normals:
-             low_poly_obj.data.clear_custom_split_normals_data() # Deprecated in 4.1? No, still valid < 4.2 usually.
+        # Remove custom split normals if present, to avoid conflicts with smooth shading.
+        # Blender API changed across versions, so we try multiple compatible paths.
+        if getattr(low_poly_obj.data, 'has_custom_normals', False):
+            cleared_normals = False
+
+            # Legacy API (Blender <= 4.x in many builds)
+            if hasattr(low_poly_obj.data, 'clear_custom_split_normals_data'):
+                try:
+                    low_poly_obj.data.clear_custom_split_normals_data()
+                    cleared_normals = True
+                except Exception as e:
+                    logger.warning(f"Legacy split normals clear failed: {e}")
+
+            # Fallback operator path (works on newer builds where direct method is absent)
+            if not cleared_normals:
+                try:
+                    bpy.ops.object.mode_set(mode='EDIT')
+                    bpy.ops.mesh.select_all(action='SELECT')
+                    bpy.ops.mesh.customdata_custom_splitnormals_clear()
+                    bpy.ops.object.mode_set(mode='OBJECT')
+                    cleared_normals = True
+                except Exception as e:
+                    logger.warning(f"Operator split normals clear failed: {e}")
+                    try:
+                        bpy.ops.object.mode_set(mode='OBJECT')
+                    except Exception:
+                        pass
              
         # Ensure Shade Smooth
         bpy.ops.object.shade_smooth()
