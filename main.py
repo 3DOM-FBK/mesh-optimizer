@@ -36,6 +36,7 @@ def run_blender_pipeline(config):
     image_resolution = pipeline_conf.get('image_resolution', 2048)
     remesh_conf = pipeline_conf.get('remesh', {})
     decim_conf = pipeline_conf.get('decimation', {}) # FIX
+    skip_remesh = pipeline_conf.get('skip_remesh', False)
     input_folder = pipeline_conf.get('input_folder')
     
     models = []
@@ -110,6 +111,10 @@ def run_blender_pipeline(config):
         # Add Decimation Override Parameters
         if 'hausdorff_threshold' in decim_conf and decim_conf['hausdorff_threshold'] is not None:
              cmd.extend(["--final_hausdorff", str(decim_conf['hausdorff_threshold'])])
+
+        # Skip remesh if configured
+        if skip_remesh:
+            cmd.append("--skip_remesh")
 
         # logger.info(f"Executing command: {' '.join(cmd)}")
         

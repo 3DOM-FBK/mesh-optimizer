@@ -1,8 +1,9 @@
 pipeline:
-  input_folder: "/data/input/debug/"
-  output_dir: "/data/output/"
+  input_folder: "/data/data/test_2/"
+  output_dir: "/data/data/test_2/"
   image_resolution: 2048
   quality: "medium"
+  skip_remesh: true  # Set to true to skip the CGAL remeshing step
   decimation:
     hausdorff_threshold: 0.001 # Max deviation for final decimation
   remesh:

@@ -107,7 +107,11 @@ WORKDIR /workspace/PartUV
 RUN sed -i 's/^trimesh.*/trimesh<4.0/' requirements.txt && \
     pip install -r requirements.txt
 
-RUN pip install partuv
+RUN pip install partuv pytz
+
+# Explicit dependency check: fail build early if PartUV runtime imports are broken.
+# Run from a neutral directory so the cloned /workspace/PartUV source tree does not shadow the installed package.
+RUN cd /tmp && /opt/partuv_env/bin/python -c "import partuv, pytz; print('PartUV/pytz import check OK')"
 
 RUN pip uninstall -y numpy && \
     pip install "numpy<2.0"

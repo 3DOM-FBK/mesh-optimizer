@@ -17,3 +17,8 @@ model_objaverse.ckpt
 # Blender local files
 *.blend
 *.blend1
+
+# Script
+3dbds_main.py
+xrculture_main.py
+

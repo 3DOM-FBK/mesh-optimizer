@@ -65,7 +65,7 @@ def ensure_checkpoint_exists(base_dir: str):
 
 def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM", image_resolution: int = 2048,
          remesh_tolerance=None, remesh_edge_min=None, remesh_edge_max=None, remesh_iterations=None,
-         final_hausdorff=None):
+         final_hausdorff=None, skip_remesh: bool = False):
     """
     Robust mesh optimization pipeline.
     Interrupts execution in case of critical error at any stage.
@@ -145,48 +145,52 @@ def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM", 
                 raise RuntimeError(f"Export HP failed for {safe_name}")
             
             # 5. Remeshing
-            logger.info(f"Phase 5 [{safe_name}]: CGAL Remeshing")
-            temp_remeshed = os.path.join(temp_dir, f"{base_name}_remeshed.obj")
-            
-            # Parametri Remesh: Use passed args or defaults (calculated or preset)
-            # Default tolerance if not specified is 0.001
-            r_tol = remesh_tolerance if remesh_tolerance is not None else 0.001
-            
-            # Default iterations if not specified is 5
-            r_iter = int(remesh_iterations) if remesh_iterations is not None else 5
-            
-            r_min = remesh_edge_min
-            r_max = remesh_edge_max
-            
-            # Se edge_min/max non sono specificati MA vogliamo invocare il remesher con parametri specifici
-            # (es. se vogliamo custom iter o tolerance), calcoliamo i default AUTO qui in Python
-            # per passarli esplicitamente.
-            # Questo serve perch il wrapper/binario richiede tutti i parametri se se ne passano alcuni avanzati.
-            
-            if r_min is None or r_max is None:
-                # Calcolo BBox Diagonal per Auto-Values
-                bbox = hp_mesh.dimensions
-                import math
-                diag = math.sqrt(bbox.x**2 + bbox.y**2 + bbox.z**2)
-                
-                if r_min is None: r_min = diag * 0.001  # 0.1%
-                if r_max is None: r_max = diag * 0.05   # 5%
-            
-            # logger.info(f"Remesh Params: Tol={r_tol}, Min={r_min}, Max={r_max}, Iter={r_iter}")
-            
-            # Use raw remesh instead of adaptive_remesh to control specific params
-            remeshed_path = CgalRemesher.remesh(
-                temp_hp, 
-                temp_remeshed, 
-                tolerance=r_tol, 
-                edge_min=r_min, 
-                edge_max=r_max, 
-                iterations=r_iter
-            )
-            
-            if not remeshed_path:
-                raise RuntimeError(f"Remeshing failed for {safe_name}")
-                
+            if skip_remesh:
+                logger.info(f"Phase 5 [{safe_name}]: CGAL Remeshing SKIPPED (skip_remesh=True)")
+                remeshed_path = temp_hp
+            else:
+                logger.info(f"Phase 5 [{safe_name}]: CGAL Remeshing")
+                temp_remeshed = os.path.join(temp_dir, f"{base_name}_remeshed.obj")
+
+                # Parametri Remesh: Use passed args or defaults (calculated or preset)
+                # Default tolerance if not specified is 0.001
+                r_tol = remesh_tolerance if remesh_tolerance is not None else 0.001
+
+                # Default iterations if not specified is 5
+                r_iter = int(remesh_iterations) if remesh_iterations is not None else 5
+
+                r_min = remesh_edge_min
+                r_max = remesh_edge_max
+
+                # Se edge_min/max non sono specificati MA vogliamo invocare il remesher con parametri specifici
+                # (es. se vogliamo custom iter o tolerance), calcoliamo i default AUTO qui in Python
+                # per passarli esplicitamente.
+                # Questo serve perch il wrapper/binario richiede tutti i parametri se se ne passano alcuni avanzati.
+
+                if r_min is None or r_max is None:
+                    # Calcolo BBox Diagonal per Auto-Values
+                    bbox = hp_mesh.dimensions
+                    import math
+                    diag = math.sqrt(bbox.x**2 + bbox.y**2 + bbox.z**2)
+
+                    if r_min is None: r_min = diag * 0.001  # 0.1%
+                    if r_max is None: r_max = diag * 0.05   # 5%
+
+                # logger.info(f"Remesh Params: Tol={r_tol}, Min={r_min}, Max={r_max}, Iter={r_iter}")
+
+                # Use raw remesh instead of adaptive_remesh to control specific params
+                remeshed_path = CgalRemesher.remesh(
+                    temp_hp,
+                    temp_remeshed,
+                    tolerance=r_tol,
+                    edge_min=r_min,
+                    edge_max=r_max,
+                    iterations=r_iter
+                )
+
+                if not remeshed_path:
+                    raise RuntimeError(f"Remeshing failed for {safe_name}")
+
             # 6. Initial Decimation
             logger.info(f"Phase 6 [{safe_name}]: Decimation Target 300k")
             remeshed_objs = MeshIO.load(remeshed_path)
@@ -203,43 +207,48 @@ def main(input_path: str, output_path: str, decimation_presets: str = "MEDIUM", 
             if not MeshDecimator.apply_decimate(lp_target, preset='CUSTOM', custom_target=300000, hausdorf_threshold=0.001):
                 raise RuntimeError(f"Initial decimation failed for {safe_name}")
             
-            # 7. UV Generation (PartUV)
-            logger.info(f"Phase 7 [{safe_name}]: PartUV Generation")
-            temp_dec = os.path.join(temp_dir, f"{base_name}_dec.obj")
-            MeshIO.export(temp_dec, objects=[lp_target])
-            
-            uv_script = os.path.join(script_dir, "uv_generator.py")
-            config_file = os.path.join(os.path.dirname(script_dir), "config", "config_partuv.yaml")
-            python_exe = "/opt/partuv_env/bin/python" # Specific PartUV Environment
-            
-            cmd_uv = [
-                python_exe, uv_script, 
-                "--mesh_path", temp_dec, 
-                "--config_path", config_file, 
-                "--output_path", temp_dir, 
-                "--pack_method", "none"
-            ]
-            
-            proc = subprocess.run(cmd_uv, capture_output=True, text=True)
-            if proc.returncode != 0:
-                logger.error(f"PartUV Error Output:\n{proc.stderr}")
-                raise RuntimeError(f"PartUV generation failed for {safe_name}")
-            
-            # 8. Load UV & Packing
-            logger.info(f"Phase 8 [{safe_name}]: Import UV & Pack")
-            uv_obj_path = os.path.join(temp_dir, f"{base_name}_dec", "final_components.obj")
-            
-            bpy.data.objects.remove(lp_target, do_unlink=True)
-            uv_objects = MeshIO.load(uv_obj_path)
-            if not uv_objects:
-                raise RuntimeError(f"UV mesh load failed for {safe_name}")
-            lp_mesh = uv_objects[0]
-            
-            try:
-                from uv_packer import UVPacker
-                UVPacker.pack_islands(lp_mesh, margin=0.001)
-            except Exception as e:
-                logger.warning(f"UV Packing warning: {e}. Proceeding anyway.")
+            if skip_remesh:
+                logger.info(f"Phase 7 [{safe_name}]: UV Generation SKIPPED (skip_remesh=True)")
+                logger.info(f"Phase 8 [{safe_name}]: UV Import/Pack SKIPPED (skip_remesh=True)")
+                lp_mesh = lp_target
+            else:
+                # 7. UV Generation (PartUV)
+                logger.info(f"Phase 7 [{safe_name}]: PartUV Generation")
+                temp_dec = os.path.join(temp_dir, f"{base_name}_dec.obj")
+                MeshIO.export(temp_dec, objects=[lp_target])
+
+                uv_script = os.path.join(script_dir, "uv_generator.py")
+                config_file = os.path.join(os.path.dirname(script_dir), "config", "config_partuv.yaml")
+                python_exe = "/opt/partuv_env/bin/python" # Specific PartUV Environment
+
+                cmd_uv = [
+                    python_exe, uv_script,
+                    "--mesh_path", temp_dec,
+                    "--config_path", config_file,
+                    "--output_path", temp_dir,
+                    "--pack_method", "none"
+                ]
+
+                proc = subprocess.run(cmd_uv, capture_output=True, text=True)
+                if proc.returncode != 0:
+                    logger.error(f"PartUV Error Output:\n{proc.stderr}")
+                    raise RuntimeError(f"PartUV generation failed for {safe_name}")
+
+                # 8. Load UV & Packing
+                logger.info(f"Phase 8 [{safe_name}]: Import UV & Pack")
+                uv_obj_path = os.path.join(temp_dir, f"{base_name}_dec", "final_components.obj")
+
+                bpy.data.objects.remove(lp_target, do_unlink=True)
+                uv_objects = MeshIO.load(uv_obj_path)
+                if not uv_objects:
+                    raise RuntimeError(f"UV mesh load failed for {safe_name}")
+                lp_mesh = uv_objects[0]
+
+                try:
+                    from uv_packer import UVPacker
+                    UVPacker.pack_islands(lp_mesh, margin=0.001)
+                except Exception as e:
+                    logger.warning(f"UV Packing warning: {e}. Proceeding anyway.")
                 
             # 9. Baking
             logger.info(f"Phase 9 [{safe_name}]: Baking Maps")
@@ -342,12 +351,21 @@ if __name__ == "__main__":
     
     # Decimation arguments
     parser.add_argument("--final_hausdorff", type=float, default=None, help="Final decimation Hausdorff threshold")
+
+    # Remesh skip
+    parser.add_argument("--skip_remesh", action="store_true", help="Skip the remeshing step")
+
+    parser.add_argument("--no_subfolder", action="store_true", help="Do not create a subfolder with input filename in output dir")
     
     args = parser.parse_args(argv)
     
-    # Create output directory based on input filename
-    input_filename = os.path.splitext(os.path.basename(args.input))[0]
-    output_dir = os.path.join(args.output, input_filename)
+    if args.no_subfolder:
+        output_dir = args.output
+    else:
+        # Create output directory based on input filename
+        input_filename = os.path.splitext(os.path.basename(args.input))[0]
+        output_dir = os.path.join(args.output, input_filename)
+        
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
@@ -356,4 +374,5 @@ if __name__ == "__main__":
          remesh_edge_min=args.remesh_edge_min,
          remesh_edge_max=args.remesh_edge_max,
          remesh_iterations=args.remesh_iterations,
-         final_hausdorff=args.final_hausdorff)
+         final_hausdorff=args.final_hausdorff,
+         skip_remesh=args.skip_remesh)
