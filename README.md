@@ -77,6 +77,7 @@ pipeline:
   output_dir: "/data/output/optimized"  # Destination for processed files
   image_resolution: 2048                # Output Texture size: 1024, 2048, 4096
   quality: "MEDIUM"                     # Optimization target: LOW, MEDIUM, HIGH
+  skip_remesh: false                     # Optional: skip CGAL remeshing and UV generation/import steps
 
   # Remeshing Parameters (Optional - Advanced)
   remesh:
@@ -100,6 +101,7 @@ pipeline:
 | | `output_dir` | `string` | `./output` | Root directory where optimized files and subfolders will be saved. |
 | | `image_resolution` | `int` | `2048` | Resolution (width/height) of the baked texture maps. |
 | | `quality` | `string` | `MEDIUM` | Preset for final polygon count (`LOW`, `MEDIUM`, `HIGH`). |
+| | `skip_remesh` | `bool` | `false` | If `true`, skips the CGAL remeshing phase and UV generation/import phases. |
 | **Remesh** | `tolerance` | `float` | `0.001` | Controls how closely the new topology follows surface curvature. |
 | | `edge_min` | `float` | `null` | Minimum allowed edge length. If `null`, calculated automatically. |
 | | `edge_max` | `float` | `null` | Maximum allowed edge length. If `null`, calculated automatically. |
